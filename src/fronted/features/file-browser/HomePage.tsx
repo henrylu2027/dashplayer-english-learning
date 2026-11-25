@@ -1,5 +1,7 @@
 import React, { useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
+import toast from 'react-hot-toast';
+import { cn } from '@/fronted/lib/utils';
 import TitleBar from '@/fronted/components/layout/TitleBar/TitleBar';
 import useLayout from '@/fronted/hooks/useLayout';
 import useFile from '@/fronted/features/file-browser/fileStore';
@@ -14,11 +16,17 @@ import {
     Captions,
     ChevronsDown,
     Clock,
+    LayoutDashboard,
+    MessagesSquare,
+    Mic,
+    PencilLine,
     PlayCircle,
+    Repeat,
     Rotate3D,
-    Scissors,
     Settings,
-    Star
+    SquareSplitHorizontal,
+    Star,
+    Video
 } from 'lucide-react';
 import FolderSelector, { FolderSelectAction } from '@/fronted/features/file-browser/components/FolderSelector';
 import FileSelector, { FileAction } from '@/fronted/features/file-browser/components/FileSelector';
@@ -80,10 +88,24 @@ const HomePage = () => {
         };
     }, []);
 
+    /**
+     * 首页导航与左侧栏（SideBar）保持完全一致的条目与顺序：
+     * 学习台 → 沉浸式播放 → 跟读打分 → 间隔复习 → 听写复述 → 场景对话 →
+     * 收藏片段 → 视频字幕生成 → 切分长视频 → 修复播放问题 → 词汇工坊 → 配音导出 → 设置中心。
+     * 这样用户在首页和播放页看到的是同一套入口，不会因为少一项而找不到路。
+     */
+    const lastVideoId = vps?.[0]?.id ?? '';
     const navItems = [
+        { title: t('dashboard'), path: '/dashboard', icon: LayoutDashboard },
+        // 沉浸式播放依赖具体视频；没有观看记录时置灰并提示，而不是消失（条目数量要与侧栏一致）
+        { title: t('playbackLab'), path: lastVideoId ? `/player/${lastVideoId}` : '', icon: Video },
+        { title: t('shadowing'), path: '/shadowing', icon: Mic },
+        { title: t('reviewPlan'), path: '/review', icon: Repeat },
+        { title: t('practice'), path: '/practice', icon: PencilLine },
+        { title: t('dialogue'), path: '/dialogue', icon: MessagesSquare },
         { title: t('savedMoments'), path: '/favorite', icon: Star },
         { title: t('subtitleWorkspace'), path: '/transcript', icon: Captions },
-        { title: t('sentenceSplitter'), path: '/split', icon: Scissors },
+        { title: t('sentenceSplitter'), path: '/split', icon: SquareSplitHorizontal },
         { title: t('playbackRepair'), path: '/repair', icon: Rotate3D },
         { title: t('vocabularyStudio'), path: '/vocabulary', icon: BookOpen },
         { title: t('dubbingExport'), path: '/dubbing', icon: AudioLines },
@@ -113,15 +135,34 @@ const HomePage = () => {
                         <div className="flex flex-col gap-1">
                             {navItems.map((item) => {
                                 const Icon = item.icon;
+                                const itemClass = 'group flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-muted/70 transition-all duration-150 w-full text-left';
+                                const body = (
+                                    <>
+                                        <Icon className="h-4 w-4 stroke-[1.8] text-muted-foreground/80 group-hover:text-primary transition-colors shrink-0" />
+                                        <span>{item.title}</span>
+                                    </>
+                                );
+                                // 没有观看记录时「沉浸式播放」不可点，但仍占位，保持条目与侧栏一致
+                                if (item.path === '') {
+                                    return (
+                                        <button
+                                            key={item.title}
+                                            type="button"
+                                            onClick={() => toast.error(t('openVideoFirst'))}
+                                            className={cn(itemClass, 'opacity-45 cursor-not-allowed hover:bg-transparent')}
+                                        >
+                                            {body}
+                                        </button>
+                                    );
+                                }
                                 return (
                                     <Link
                                         key={item.path}
                                         onClick={() => fileBrowserApi.changeWindowSize('player')}
                                         to={item.path}
-                                        className="group flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-muted/70 transition-all duration-150"
+                                        className={itemClass}
                                     >
-                                        <Icon className="h-4 w-4 stroke-[1.8] text-muted-foreground/80 group-hover:text-primary transition-colors shrink-0" />
-                                        <span>{item.title}</span>
+                                        {body}
                                     </Link>
                                 );
                             })}
