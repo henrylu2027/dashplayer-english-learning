@@ -1,0 +1,29 @@
+DashPlayer English Learning Edition
+Copyright (C) 2026 132cnn-pixel
+
+This project is a modified version of DashPlayer:
+  DashPlayer
+  Copyright (C) solidSpoon and contributors
+  https://github.com/solidSpoon/DashPlayer
+  Licensed under the GNU Affero General Public License v3.0 (AGPL-3.0)
+
+Modifications made in this fork (2026-11-25):
+  - Added sentence-level shadowing with word-level scoring (dp_shadowing_attempt)
+  - Added sentence-level spaced review driven by real attempt scores (dp_srs_card)
+  - Added a learning dashboard (shadowing / dictation-retell / dialogue)
+  - Added dictation and retelling practice (dp_practice_attempt)
+  - Added scene dialogue with local/cloud model backends (dp_dialogue_session, dp_dialogue_turn)
+  - Refactored shared engines: tokenization, word alignment, sentence audio, recorded speech, recorder
+  - Added migrations 0007-0010
+  - Adapted the local build for Windows (PowerShell zip extraction, bundled runtime placeholders)
+
+This program is free software: you can redistribute it and/or modify it under
+the terms of the GNU Affero General Public License as published by the Free
+Software Foundation, version 3 of the License.
+
+This program is distributed in the hope that it will be useful, but WITHOUT ANY
+WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A
+PARTICULAR PURPOSE. See the GNU Affero General Public License for more details.
+
+You should have received a copy of the GNU Affero General Public License along
+with this program. If not, see <https://www.gnu.org/licenses/>.
