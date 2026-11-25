@@ -277,7 +277,7 @@
             "license": "Open Source License",
             "licenseDesc": "Free & open source under AGPLv3"
         },
-        "footer": "Crafted with care by solidSpoon",
+        "footer": "Built by Henry Lu on top of solidSpoon",
         "version": "Version {{version}}"
     },
     "storage": {

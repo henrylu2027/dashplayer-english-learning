@@ -126,7 +126,7 @@ const AboutSetting = () => {
                             {t('about.update.checkNow', { defaultValue: '检查更新' })}
                         </Button>
                         <Button
-                            onClick={() => openUrl('https://github.com/solidSpoon/DashPlayer/releases/latest')}
+                            onClick={() => openUrl('https://github.com/henrylu2027/dashplayer-english-learning/releases/latest')}
                             size="sm"
                             variant="ghost"
                             className="h-8 gap-1 text-xs text-muted-foreground hover:text-foreground"
@@ -170,7 +170,7 @@ const AboutSetting = () => {
                             </div>
 
                             <Button
-                                onClick={() => openUrl(updateResult?.releases[0]?.url || 'https://github.com/solidSpoon/DashPlayer/releases/latest')}
+                                onClick={() => openUrl(updateResult?.releases[0]?.url || 'https://github.com/henrylu2027/dashplayer-english-learning/releases/latest')}
                                 size="sm"
                                 variant="default"
                                 className="gap-1 h-7 px-2.5 text-xs font-medium shrink-0"
@@ -213,7 +213,7 @@ const AboutSetting = () => {
                     <Button
                         variant="outline"
                         size="sm"
-                        onClick={() => openUrl('https://solidspoon.xyz/DashPlayer/home.html')}
+                        onClick={() => openUrl('https://github.com/henrylu2027/dashplayer-english-learning#readme')}
                         className="gap-1.5 h-8 text-xs text-muted-foreground hover:text-foreground"
                     >
                         {t('common.viewDocs', { defaultValue: '查看文档' })}
@@ -229,7 +229,7 @@ const AboutSetting = () => {
                     <Button
                         variant="outline"
                         size="sm"
-                        onClick={() => openUrl('https://github.com/solidSpoon/DashPlayer')}
+                        onClick={() => openUrl('https://github.com/henrylu2027/dashplayer-english-learning')}
                         className="gap-1.5 h-8 text-xs text-muted-foreground hover:text-foreground"
                     >
                         GitHub
@@ -244,7 +244,7 @@ const AboutSetting = () => {
                     <Button
                         variant="outline"
                         size="sm"
-                        onClick={() => openUrl('https://github.com/solidSpoon/DashPlayer/blob/main/LICENSE')}
+                        onClick={() => openUrl('https://github.com/henrylu2027/dashplayer-english-learning/blob/main/LICENSE')}
                         className="gap-1.5 h-8 text-xs text-muted-foreground hover:text-foreground"
                     >
                         GNU AGPLv3
@@ -254,7 +254,7 @@ const AboutSetting = () => {
             </SettingCard>
 
             <div className="pt-2 pb-6 text-center text-[11px] text-muted-foreground/60">
-                {t('about.footer', { defaultValue: '由 solidSpoon 用心打造' })} · GNU AGPLv3
+                {t('about.footer', { defaultValue: '由 Henry Lu 基于 solidSpoon 二次开发' })} · GNU AGPLv3
             </div>
         </SettingsPageShell>
     );

@@ -277,7 +277,7 @@
             "license": "开源协议",
             "licenseDesc": "基于 AGPLv3 自由开源"
         },
-        "footer": "由 solidSpoon 用心打造",
+        "footer": "由 Henry Lu 基于 solidSpoon 二次开发",
         "version": "版本 {{version}}"
     },
     "storage": {
