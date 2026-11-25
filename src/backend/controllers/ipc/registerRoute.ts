@@ -15,6 +15,9 @@ const QUIET_PATH_POLICIES: Partial<Record<string, { logParam: boolean; logResult
     'watch-history/progress/update': { logParam: false, logResult: false },
     // 录音二进制走 IPC，param 里是整段音频字节，落日志只有噪音
     'dubbing/save-take': { logParam: false, logResult: true },
+    'shadowing/score': { logParam: false, logResult: true },
+    'practice/retell': { logParam: false, logResult: true },
+    'dialogue/transcribe': { logParam: false, logResult: true },
 };
 
 /**

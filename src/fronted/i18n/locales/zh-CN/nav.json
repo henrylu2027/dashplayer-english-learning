@@ -1,5 +1,10 @@
 {
+    "dashboard": "学习台",
     "playbackLab": "沉浸式播放",
+    "shadowing": "跟读打分",
+    "reviewPlan": "间隔复习",
+    "practice": "听写复述",
+    "dialogue": "场景对话",
     "savedMoments": "收藏片段",
     "subtitleWorkspace": "视频字幕生成",
     "sentenceSplitter": "切分长视频",

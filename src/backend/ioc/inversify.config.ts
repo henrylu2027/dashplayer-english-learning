@@ -55,6 +55,33 @@ import { FfmpegServiceImpl } from '@/backend/services/FfmpegService';
 import type DubbingService from '@/backend/services/DubbingService';
 import { DubbingServiceImpl } from '@/backend/services/DubbingService';
 import DubbingController from '@/backend/controllers/DubbingController';
+import type ShadowingService from '@/backend/services/ShadowingService';
+import { ShadowingServiceImpl } from '@/backend/services/ShadowingService';
+import ShadowingController from '@/backend/controllers/ShadowingController';
+import type ShadowingAttemptRepository from '@/backend/services/repositories/ShadowingAttemptRepository';
+import ShadowingAttemptRepositoryImpl from '@/backend/infrastructure/db/repositories/ShadowingAttemptRepositoryImpl';
+import type SrsService from '@/backend/services/SrsService';
+import { SrsServiceImpl } from '@/backend/services/SrsService';
+import SrsController from '@/backend/controllers/SrsController';
+import type SrsCardRepository from '@/backend/services/repositories/SrsCardRepository';
+import SrsCardRepositoryImpl from '@/backend/infrastructure/db/repositories/SrsCardRepositoryImpl';
+import type DashboardService from '@/backend/services/DashboardService';
+import { DashboardServiceImpl } from '@/backend/services/DashboardService';
+import DashboardController from '@/backend/controllers/DashboardController';
+import type SentenceAudioService from '@/backend/services/SentenceAudioService';
+import { SentenceAudioServiceImpl } from '@/backend/services/SentenceAudioService';
+import type RecordedSpeechService from '@/backend/services/speech/RecordedSpeechService';
+import { RecordedSpeechServiceImpl } from '@/backend/services/speech/RecordedSpeechService';
+import type PracticeService from '@/backend/services/PracticeService';
+import { PracticeServiceImpl } from '@/backend/services/PracticeService';
+import PracticeController from '@/backend/controllers/PracticeController';
+import type PracticeAttemptRepository from '@/backend/services/repositories/PracticeAttemptRepository';
+import PracticeAttemptRepositoryImpl from '@/backend/infrastructure/db/repositories/PracticeAttemptRepositoryImpl';
+import type DialogueService from '@/backend/services/DialogueService';
+import { DialogueServiceImpl } from '@/backend/services/DialogueService';
+import DialogueController from '@/backend/controllers/DialogueController';
+import type DialogueRepository from '@/backend/services/repositories/DialogueRepository';
+import DialogueRepositoryImpl from '@/backend/infrastructure/db/repositories/DialogueRepositoryImpl';
 import type DpTaskService from '@/backend/services/DpTaskService';
 import { DpTaskServiceImpl } from '@/backend/services/DpTaskService';
 import type ChatService from '@/backend/services/ChatService';
@@ -219,6 +246,11 @@ container.bind<Controller>(TYPES.Controller).to(SherpaTtsModelController).inSing
 container.bind<Controller>(TYPES.Controller).to(VocabularyController).inSingletonScope();
 container.bind<Controller>(TYPES.Controller).to(VideoLearningApiController).inSingletonScope();
 container.bind<Controller>(TYPES.Controller).to(DubbingController).inSingletonScope();
+container.bind<Controller>(TYPES.Controller).to(ShadowingController).inSingletonScope();
+container.bind<Controller>(TYPES.Controller).to(SrsController).inSingletonScope();
+container.bind<Controller>(TYPES.Controller).to(DashboardController).inSingletonScope();
+container.bind<Controller>(TYPES.Controller).to(PracticeController).inSingletonScope();
+container.bind<Controller>(TYPES.Controller).to(DialogueController).inSingletonScope();
 // 恢复路由控制器：不绑定到 TYPES.Controller（恢复模式下不解析业务控制器），单独绑定。
 container.bind<MigrationFailureController>(TYPES.MigrationFailureController).to(MigrationFailureController).inSingletonScope();
 // Services
@@ -255,6 +287,21 @@ container.bind<ClipOssService>(TYPES.ClipOssService).to(ClipOssServiceImpl).inSi
 container.bind<ClipOssService>(TYPES.VideoLearningOssService).to(VideoLearningOssServiceImpl).inSingletonScope();
 container.bind<FavouriteClipsService>(TYPES.FavouriteClips).to(FavouriteClipsServiceImpl).inSingletonScope();
 container.bind<DubbingService>(TYPES.DubbingService).to(DubbingServiceImpl).inSingletonScope();
+container.bind<ShadowingService>(TYPES.ShadowingService).to(ShadowingServiceImpl).inSingletonScope();
+container.bind<ShadowingAttemptRepository>(TYPES.ShadowingAttemptRepository)
+    .to(ShadowingAttemptRepositoryImpl)
+    .inSingletonScope();
+container.bind<SrsService>(TYPES.SrsService).to(SrsServiceImpl).inSingletonScope();
+container.bind<SrsCardRepository>(TYPES.SrsCardRepository).to(SrsCardRepositoryImpl).inSingletonScope();
+container.bind<DashboardService>(TYPES.DashboardService).to(DashboardServiceImpl).inSingletonScope();
+container.bind<SentenceAudioService>(TYPES.SentenceAudioService).to(SentenceAudioServiceImpl).inSingletonScope();
+container.bind<RecordedSpeechService>(TYPES.RecordedSpeechService).to(RecordedSpeechServiceImpl).inSingletonScope();
+container.bind<PracticeService>(TYPES.PracticeService).to(PracticeServiceImpl).inSingletonScope();
+container.bind<PracticeAttemptRepository>(TYPES.PracticeAttemptRepository)
+    .to(PracticeAttemptRepositoryImpl)
+    .inSingletonScope();
+container.bind<DialogueService>(TYPES.DialogueService).to(DialogueServiceImpl).inSingletonScope();
+container.bind<DialogueRepository>(TYPES.DialogueRepository).to(DialogueRepositoryImpl).inSingletonScope();
 container.bind<VideoLearningService>(TYPES.VideoLearningService).to(VideoLearningServiceImpl).inSingletonScope();
 container.bind<TagService>(TYPES.TagService).to(TagServiceImpl).inSingletonScope();
 container.bind<SrtTimeAdjustService>(TYPES.SrtTimeAdjustService).to(SrtTimeAdjustServiceImpl).inSingletonScope();

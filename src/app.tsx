@@ -25,6 +25,11 @@ import Eb from '@/fronted/components/shared/common/Eb';
 import FavouritePage from '@/fronted/features/favourite/FavouritePage';
 import VideoLearningPage from '@/fronted/features/video-learning/VideoLearningPage';
 import DubbingExportPage from '@/fronted/features/dubbing/DubbingExportPage';
+import ShadowingPage from '@/fronted/features/shadowing/ShadowingPage';
+import SrsReviewPage from '@/fronted/features/srs/SrsReviewPage';
+import DashboardPage from '@/fronted/features/dashboard/DashboardPage';
+import PracticePage from '@/fronted/features/practice/PracticePage';
+import DialoguePage from '@/fronted/features/dialogue/DialoguePage';
 import { OnboardingView } from '@/fronted/features/onboarding/OnboardingView';
 import { getOnboardingCompletedVersion } from '@/fronted/features/onboarding/onboardingApi';
 import { MigrationFailureGate } from '@/fronted/features/migration-failure/MigrationFailureGate';
@@ -173,6 +178,26 @@ export const App = () => {
                                     <Route
                                         path="favorite"
                                         element={<Eb key="favorite"><FavouritePage /></Eb>}
+                                    />
+                                    <Route
+                                        path="dashboard"
+                                        element={<Eb key="dashboard"><DashboardPage /></Eb>}
+                                    />
+                                    <Route
+                                        path="shadowing"
+                                        element={<Eb key="shadowing"><ShadowingPage /></Eb>}
+                                    />
+                                    <Route
+                                        path="review"
+                                        element={<Eb key="review"><SrsReviewPage /></Eb>}
+                                    />
+                                    <Route
+                                        path="practice"
+                                        element={<Eb key="practice"><PracticePage /></Eb>}
+                                    />
+                                    <Route
+                                        path="dialogue"
+                                        element={<Eb key="dialogue"><DialoguePage /></Eb>}
                                     />
                                     <Route
                                         path="split"

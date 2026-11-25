@@ -11,6 +11,7 @@ import * as tarFs from 'tar-fs';
 import unbzip2Stream from 'unbzip2-stream';
 import chalk from 'chalk';
 import { $ } from 'zx';
+import { spawnSync } from 'child_process';
 import { withNetworkRetry } from './network-retry.mjs';
 import {
     WHISPER_CPP_REF,
@@ -81,9 +82,23 @@ const extractZip = async (zipPath, destDir) => {
         const zipArg = String(zipPath).replaceAll('\\', '/');
         const destArg = String(destDir).replaceAll('\\', '/');
         try {
-            await $`pwsh -NoProfile -ExecutionPolicy Bypass -File ${psFileArg} ${zipArg} ${destArg}`;
-        } catch {
-            await $`powershell -NoProfile -ExecutionPolicy Bypass -File ${psFileArg} ${zipArg} ${destArg}`;
+            // 本地构建兼容:没装 pwsh 的机器直接用系统 PowerShell 解压,
+            // 绕开 zx 在 Windows 上对参数转义的依赖。
+            const psExe = ['pwsh', 'powershell'].find((exe) => {
+                const probe = spawnSync(exe, ['-NoProfile', '-Command', 'exit 0'], { stdio: 'ignore' });
+                return probe.status === 0;
+            });
+            if (!psExe) {
+                throw new Error('找不到 PowerShell(pwsh / powershell),无法解压 zip');
+            }
+            const result = spawnSync(
+                psExe,
+                ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', psFile, zipPath, destDir],
+                { stdio: 'inherit' }
+            );
+            if (result.status !== 0) {
+                throw new Error(`Expand-Archive 失败,退出码 ${result.status}`);
+            }
         } finally {
             try {
                 fs.rmSync(psTmpDir, { recursive: true, force: true });

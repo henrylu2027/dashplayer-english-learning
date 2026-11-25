@@ -1,0 +1,321 @@
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
+import { useNavigate } from 'react-router-dom';
+import toast from 'react-hot-toast';
+import { ArrowLeft, Loader2, MessagesSquare } from 'lucide-react';
+
+import type {
+    DialogueAvailability,
+    DialogueDetail,
+    DialogueDifficulty,
+    DialogueModelBackend,
+    DialogueReview,
+    DialogueScene,
+    DialogueSessionSummary,
+} from '@/common/contracts/dialogue';
+import PageHeader from '@/fronted/components/shared/common/PageHeader';
+import { Button } from '@/fronted/components/ui/button';
+import useFile from '@/fronted/features/file-browser/fileStore';
+import { usePlayer } from '@/fronted/features/player/playerStore';
+import { buildVideoShadowingSource } from '@/fronted/features/shadowing/shadowingSource';
+import { getTtsUrl, playAudioUrl } from '@/fronted/infrastructure/audio/AudioPlayer';
+import { getRendererLogger } from '@/fronted/log/simple-logger';
+import { cn } from '@/fronted/lib/utils';
+import { dialogueApi } from './dialogueApi';
+import DialogueSessionView from './components/DialogueSessionView';
+import HistoryList from './components/HistoryList';
+import ReviewPanel from './components/ReviewPanel';
+import SceneCardView from './components/SceneCardView';
+import SceneSetupCard from './components/SceneSetupCard';
+
+const logger = getRendererLogger('DialoguePage');
+
+/** 历史列表条数。 */
+const HISTORY_LIMIT = 10;
+
+/**
+ * 场景对话页：从当前台词生成角色扮演场景，语音或文字演完，结束后复盘。
+ *
+ * 页面不提供自由场景：锚点必须是播放器当前视频句，保证每次对话都能回到具体语境；
+ * 模型后端在生成前显式选择，本地与云端不会静默互相顶替。
+ */
+export default function DialoguePage() {
+    const { t } = useTranslation('pages');
+    const navigate = useNavigate();
+    const currentSentence = usePlayer((state) => state.currentSentence);
+    const sentences = usePlayer((state) => state.sentences);
+    const videoPath = useFile((state) => state.videoPath);
+    const subtitlePath = useFile((state) => state.subtitlePath);
+    const videoId = useFile((state) => state.videoId);
+
+    const [availability, setAvailability] = useState<DialogueAvailability | null>(null);
+    const [difficulty, setDifficulty] = useState<DialogueDifficulty>('basic');
+    const [backend, setBackend] = useState<DialogueModelBackend>('local');
+    const [creating, setCreating] = useState(false);
+    const [active, setActive] = useState<{ session: DialogueSessionSummary; scene: DialogueScene } | null>(null);
+    const [review, setReview] = useState<DialogueReview | null>(null);
+    const [history, setHistory] = useState<DialogueSessionSummary[]>([]);
+    const [historyDetail, setHistoryDetail] = useState<DialogueDetail | null>(null);
+    const [detailLoading, setDetailLoading] = useState(false);
+    const [error, setError] = useState<string | null>(null);
+    /** 只在首次拿到可用性时选默认后端，之后不覆盖用户的选择。 */
+    const backendInitializedRef = useRef(false);
+
+    const refreshHistory = useCallback(async (): Promise<void> => {
+        try {
+            setHistory(await dialogueApi.list({ limit: HISTORY_LIMIT }));
+        } catch (historyError) {
+            logger.error('加载对话历史失败', { error: historyError });
+        }
+    }, []);
+
+    useEffect(() => {
+        let cancelled = false;
+        dialogueApi.availability()
+            .then((result) => {
+                if (cancelled) {
+                    return;
+                }
+                setAvailability(result);
+                if (!backendInitializedRef.current) {
+                    backendInitializedRef.current = true;
+                    // 本地优先；本地不可用而云端可用时切到云端，并在界面上如实展示
+                    setBackend(result.local.available ? 'local' : 'cloud');
+                }
+            })
+            .catch((availabilityError) => {
+                logger.error('查询模型可用性失败', { error: availabilityError });
+                if (!cancelled) {
+                    setError(availabilityError instanceof Error
+                        ? availabilityError.message
+                        : t('dialogue.availabilityFailed'));
+                }
+            });
+        // 历史加载放在异步回调里：effect 体内不同步 setState，避免级联渲染
+        (async () => {
+            try {
+                const sessions = await dialogueApi.list({ limit: HISTORY_LIMIT });
+                if (!cancelled) {
+                    setHistory(sessions);
+                }
+            } catch (historyError) {
+                logger.error('加载对话历史失败', { error: historyError });
+            }
+        })();
+        return () => {
+            cancelled = true;
+        };
+    }, [refreshHistory, t]);
+
+    /** 当前句及前后各三句，作为场景生成的语境。 */
+    const paragraphLines = useMemo(() => {
+        if (!currentSentence) {
+            return [];
+        }
+        const ordered = [...sentences].sort((a, b) => a.index - b.index);
+        const position = ordered.findIndex((item) => item.index === currentSentence.index);
+        if (position < 0) {
+            return [currentSentence.text];
+        }
+        return ordered
+            .slice(Math.max(0, position - 3), position + 4)
+            .map((item) => item.text);
+    }, [currentSentence, sentences]);
+
+    const speak = useCallback((text: string) => {
+        if (!text.trim()) {
+            return;
+        }
+        getTtsUrl(text)
+            .then((url) => playAudioUrl(url))
+            .catch((speakError) => {
+                logger.error('朗读失败', { error: speakError });
+            });
+    }, []);
+
+    const handleCreate = async (): Promise<void> => {
+        if (!currentSentence) {
+            return;
+        }
+        setCreating(true);
+        setError(null);
+        setReview(null);
+        setHistoryDetail(null);
+        try {
+            const result = await dialogueApi.create({
+                anchorText: currentSentence.text,
+                paragraphLines,
+                source: buildVideoShadowingSource(currentSentence, videoPath, subtitlePath),
+                difficulty,
+                backend,
+            });
+            setActive({ session: result.session, scene: result.scene });
+            await refreshHistory();
+        } catch (createError) {
+            logger.error('场景生成失败', { error: createError });
+            setError(createError instanceof Error ? createError.message : t('dialogue.createFailed'));
+        } finally {
+            setCreating(false);
+        }
+    };
+
+    const handleFinished = async (session: DialogueSessionSummary, result: DialogueReview): Promise<void> => {
+        setActive(null);
+        setReview(result);
+        await refreshHistory();
+        logger.info('对话复盘完成', { sessionId: session.id });
+    };
+
+    const handleOpenHistory = async (sessionId: number): Promise<void> => {
+        setDetailLoading(true);
+        setHistoryDetail(null);
+        try {
+            const detail = await dialogueApi.detail(sessionId);
+            setHistoryDetail(detail);
+            setActive(null);
+            setReview(null);
+        } catch (detailError) {
+            logger.error('读取对话详情失败', { error: detailError });
+            toast.error(detailError instanceof Error ? detailError.message : t('dialogue.detailFailed'));
+        } finally {
+            setDetailLoading(false);
+        }
+    };
+
+    const resetToSetup = (): void => {
+        setActive(null);
+        setReview(null);
+        setHistoryDetail(null);
+        setError(null);
+    };
+
+    const renderMain = () => {
+        if (historyDetail) {
+            return (
+                <>
+                    <section className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-border/60 bg-card px-4 py-3 shadow-xs">
+                        <div className="min-w-0">
+                            <div className="truncate text-sm font-medium text-foreground">{historyDetail.session.title}</div>
+                            <div className="mt-0.5 text-xs text-muted-foreground">
+                                {new Date(historyDetail.session.createdAt).toLocaleString()}
+                                {' · '}
+                                {t('dialogue.historyTurns', { count: historyDetail.session.turnCount })}
+                            </div>
+                        </div>
+                        <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            className="h-8 rounded-lg px-3 text-xs"
+                            onClick={resetToSetup}
+                        >
+                            <ArrowLeft className="mr-1 h-3.5 w-3.5" />
+                            {t('dialogue.back')}
+                        </Button>
+                    </section>
+                    <SceneCardView scene={historyDetail.scene} onSpeak={speak} />
+                    <section className="flex flex-col gap-2 rounded-2xl border border-border/60 bg-card p-5 shadow-xs">
+                        {historyDetail.turns.map((turn) => (
+                            <div key={turn.id} className={cn('flex flex-col', turn.role === 'user' ? 'items-end' : 'items-start')}>
+                                <div className="mb-0.5 text-[11px] text-muted-foreground">
+                                    {turn.role === 'user' ? t('dialogue.userLabel') : t('dialogue.aiLabel')}
+                                </div>
+                                <div
+                                    className={cn(
+                                        'max-w-[85%] whitespace-pre-wrap rounded-2xl px-3.5 py-2.5 text-sm leading-6',
+                                        turn.role === 'user'
+                                            ? 'rounded-tr-sm bg-primary text-primary-foreground'
+                                            : 'rounded-tl-sm bg-muted/70 text-foreground',
+                                    )}
+                                >
+                                    {turn.content}
+                                </div>
+                            </div>
+                        ))}
+                    </section>
+                    {historyDetail.review ? (
+                        <ReviewPanel review={historyDetail.review} onSpeak={speak} onRestart={resetToSetup} />
+                    ) : (
+                        <section className="rounded-2xl border border-dashed border-border/60 px-4 py-5 text-center text-xs text-muted-foreground">
+                            {t('dialogue.unfinished')}
+                        </section>
+                    )}
+                </>
+            );
+        }
+        if (review) {
+            return <ReviewPanel review={review} onSpeak={speak} onRestart={resetToSetup} />;
+        }
+        if (active) {
+            return (
+                <DialogueSessionView
+                    key={active.session.id}
+                    session={active.session}
+                    scene={active.scene}
+                    onFinished={(session, result) => {
+                        void handleFinished(session, result);
+                    }}
+                    onSpeak={speak}
+                />
+            );
+        }
+        if (!currentSentence) {
+            return (
+                <div className="flex flex-col items-center justify-center gap-3 rounded-2xl border border-border/60 bg-card px-6 py-14 text-center shadow-xs">
+                    <MessagesSquare className="h-8 w-8 text-muted-foreground/40" />
+                    <h3 className="text-base font-medium text-foreground/80">{t('dialogue.noSentenceTitle')}</h3>
+                    <p className="max-w-sm text-xs leading-5 text-muted-foreground">{t('dialogue.noSentenceGuide')}</p>
+                    <Button
+                        type="button"
+                        size="sm"
+                        className="mt-1 h-8 rounded-lg px-3 text-xs"
+                        onClick={() => navigate(videoId ? `/player/${videoId}?sideBarAnimation=false` : '/home')}
+                    >
+                        <ArrowLeft className="mr-1 h-3.5 w-3.5" />
+                        {t('dialogue.goPlayer')}
+                    </Button>
+                </div>
+            );
+        }
+        return (
+            <>
+                {error && (
+                    <div className="rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-500">
+                        {error}
+                    </div>
+                )}
+                <SceneSetupCard
+                    anchorText={currentSentence.text}
+                    availability={availability}
+                    difficulty={difficulty}
+                    backend={backend}
+                    creating={creating}
+                    onDifficultyChange={setDifficulty}
+                    onBackendChange={setBackend}
+                    onCreate={() => void handleCreate()}
+                />
+            </>
+        );
+    };
+
+    return (
+        <div className="w-full h-full flex flex-col overflow-hidden select-none bg-background text-foreground">
+            <div className="px-6 pt-5 pb-2">
+                <PageHeader title={t('dialogue.title')} description={t('dialogue.description')} />
+            </div>
+
+            <div className="flex-1 min-h-0 overflow-y-auto px-6 pb-6 pt-2">
+                <div className="mx-auto flex w-full max-w-4xl flex-col gap-4">
+                    {detailLoading && (
+                        <div className="flex items-center justify-center gap-2 rounded-2xl border border-border/60 bg-card px-4 py-8 text-sm text-muted-foreground">
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                            {t('dialogue.detailLoading')}
+                        </div>
+                    )}
+                    {renderMain()}
+                    <HistoryList sessions={history} onOpen={(id) => void handleOpenHistory(id)} />
+                </div>
+            </div>
+        </div>
+    );
+}

@@ -10,6 +10,7 @@ import { CLOUD_AI_NOT_CONFIGURED_MESSAGE } from '@/backend/services/AiProviderSe
 import type {
     ChatSessionCreateParams,
     ChatSessionCreateResult,
+    ChatSessionMode,
     ChatSendMessageParams,
     ChatSendMessageResult,
     GetSubtitleContextResult,
@@ -28,7 +29,9 @@ import {
     splitSystemMessages,
 } from '@/backend/services/chat/ChatPromptBuilder';
 import type ChatSessionStore from '@/backend/services/chat/ChatSessionStore';
+import type { ChatSession } from '@/backend/services/chat/ChatSessionStore';
 import type CacheService from '@/backend/services/CacheService';
+import type LocalAiService from '@/backend/services/LocalAiService';
 
 /**
  * 把流内异常转成给用户看的错误文案。
@@ -86,6 +89,9 @@ export class ChatSessionServiceImpl implements ChatSessionService {
 
     @inject(TYPES.CacheService)
     private cacheService!: CacheService;
+
+    @inject(TYPES.LocalAiService)
+    private localAiService!: LocalAiService;
 
     /**
      * 创建由 main 进程持有的内存会话。
@@ -155,7 +161,7 @@ export class ChatSessionServiceImpl implements ChatSessionService {
         const sessionId = params.sessionId;
         const content = params.content;
         const session = this.chatSessionStore.get(sessionId);
-        const model = this.aiProviderService.getModel('sentenceLearning');
+        const model = await this.resolveModel(session);
         const messageId = this.createMessageId();
         if (!model) {
             this.rendererGateway.fireAndForget('chat/stream', {
@@ -165,8 +171,10 @@ export class ChatSessionServiceImpl implements ChatSessionService {
             return { messageId };
         }
 
+        const isDialogue = session.mode === 'scenario-dialogue';
         const isFirstTurn = session.messages.length === 0;
-        const contextText = isFirstTurn
+        // 对话的场景信息在系统人设里，首轮不再追加字幕参考材料，避免和角色设定重复
+        const contextText = !isDialogue && isFirstTurn
             ? buildSubtitleContext({
                 originalTopic: session.originalTopic,
                 paragraphLines: session.paragraphLines,
@@ -178,10 +186,28 @@ export class ChatSessionServiceImpl implements ChatSessionService {
             content: contextText ? `${contextText}\n\n${content}` : content,
         });
 
-        const enrichedMessages = ensureChatRoleMessage([...session.messages]);
-        this.startTextRun(sessionId, messageId, model, enrichedMessages);
+        const enrichedMessages: ModelMessage[] = isDialogue
+            ? [{ role: 'system', content: session.systemPrompt! }, ...session.messages]
+            : ensureChatRoleMessage([...session.messages]);
+        this.startTextRun(sessionId, messageId, model, enrichedMessages, session.mode);
 
         return { messageId };
+    }
+
+    /**
+     * 按会话模式选择模型。
+     *
+     * 说明：整句学习固定走云端「整句讲解」槽位；场景对话可显式选择本地模型，
+     * 本地不可用时直接抛错，不回退到云端（模型来源必须与界面选择一致）。
+     *
+     * @param session 当前会话。
+     * @returns 可调用的语言模型；仅云端凭据不完整时返回 null。
+     */
+    private async resolveModel(session: ChatSession): Promise<LanguageModel | null> {
+        if (session.mode === 'scenario-dialogue' && session.backend === 'local') {
+            return this.localAiService.getLanguageModel();
+        }
+        return this.aiProviderService.getModel('sentenceLearning');
     }
 
     /**
@@ -196,9 +222,10 @@ export class ChatSessionServiceImpl implements ChatSessionService {
         messageId: string,
         model: LanguageModel,
         messages: ModelMessage[],
+        mode: ChatSessionMode,
     ): void {
         const abortSignal = this.chatSessionStore.startRun(sessionId, messageId);
-        this.runStream(sessionId, messageId, model, messages, abortSignal)
+        this.runStream(sessionId, messageId, model, messages, abortSignal, mode)
             .catch((error) => this.handleTextError(sessionId, error))
             .finally(() => this.chatSessionStore.finishRun(sessionId, messageId));
     }
@@ -217,18 +244,20 @@ export class ChatSessionServiceImpl implements ChatSessionService {
         model: LanguageModel,
         messages: ModelMessage[],
         abortSignal: AbortSignal,
+        mode: ChatSessionMode,
     ): Promise<void> {
         // v7 起 system 不能放在 messages 里，需拆出来走 system 参数，否则流会静默空转
         const { system, messages: promptMessages } = splitSystemMessages(messages);
         // 生命周期日志记 info：生产环境默认 info 级，只有这样"流是否开始/完成、生成了多少 chunk"才可回溯。
         const startedAt = Date.now();
-        this.logger.info('chat stream start', { sessionId, messageId });
+        this.logger.info('chat stream start', { sessionId, messageId, mode });
+        // 场景对话不挂字幕工具：角色扮演不需要检索整片字幕，也给小模型省掉工具协议开销
+        const learningTools = mode === 'sentence-learning' ? this.buildSubtitleTools(sessionId) : null;
         const result = streamText({
             model,
             system,
             messages: promptMessages,
-            tools: this.buildSubtitleTools(sessionId),
-            stopWhen: isStepCount(20),
+            ...(learningTools ? { tools: learningTools, stopWhen: isStepCount(20) } : {}),
             abortSignal,
         });
         let chunkCount = 0;

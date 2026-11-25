@@ -44,6 +44,20 @@ import type {
 } from '@/common/types/chat';
 import type { AnalysisStartParams, AnalysisStartResult } from '@/common/types/analysis';
 import type {
+    DialogueAppendTurnRequest,
+    DialogueAppendTurnResult,
+    DialogueAvailability,
+    DialogueCreateRequest,
+    DialogueCreateResult,
+    DialogueDetail,
+    DialogueFinishRequest,
+    DialogueFinishResult,
+    DialogueListQuery,
+    DialogueSessionSummary,
+    DialogueTranscribeRequest,
+    DialogueTranscribeResult,
+} from '@/common/contracts/dialogue';
+import type {
     ServiceCredentialSettingDetailVO,
     ServiceCredentialSettingSaveVO,
 } from '@/common/types/vo/service-credentials-setting-vo';
@@ -67,6 +81,28 @@ import type { VideoInfo } from '@/common/types/video-info';
 import type { StorageStatusVO } from '@/common/types/vo/StorageStatusVO';
 import type { TranscriptTask } from '@/common/contracts/transcript/transcript-task';
 import type { DubbingExportStatus, DubbingLibraryEntry, DubbingManifest, DubbingTakeVO } from '@/common/contracts/dubbing';
+import type {
+    ShadowingAttemptQuery,
+    ShadowingAttemptSource,
+    ShadowingAttemptSummary,
+    ShadowingScoreResponse,
+} from '@/common/contracts/shadowing';
+import type {
+    SrsAddCardRequest,
+    SrsAddCardResponse,
+    SrsOverview,
+    SrsReviewOutcome,
+    SrsSubmitReviewRequest,
+} from '@/common/contracts/srs';
+import type { DashboardSummary } from '@/common/contracts/dashboard';
+import type {
+    DictationRequest,
+    DictationResult,
+    PracticeAttemptQuery,
+    PracticeAttemptSummary,
+    RetellRequest,
+    RetellResult,
+} from '@/common/contracts/practice';
 
 /** 跨进程请求与返回值契约。 */
 interface ApiDefinition {
@@ -470,6 +506,65 @@ interface VideoLearningDef {
 }
 
 
+/** 跟读打分 IPC 定义。 */
+interface ShadowingDef {
+    'shadowing/score': {
+        params: {
+            /** 要跟读的参考文本。 */
+            referenceText: string;
+            /** 渲染进程录制的原始音频字节。 */
+            audio: Uint8Array;
+            /** 录音 MIME 类型，用于决定后端临时文件扩展名。 */
+            mimeType: string;
+            /** 句子来源；视频来源必须带 videoKey 与 sentenceIndex。 */
+            source: ShadowingAttemptSource;
+        },
+        /** 逐词反馈、各项得分与已落库的记录摘要。 */
+        return: ShadowingScoreResponse
+    };
+    'shadowing/list-attempts': {
+        params: ShadowingAttemptQuery,
+        /** 按时间倒序排列的跟读记录摘要。 */
+        return: ShadowingAttemptSummary[]
+    };
+}
+
+/** 精听练习 IPC 定义。 */
+interface PracticeDef {
+    'practice/dictation': { params: DictationRequest, return: DictationResult };
+    'practice/retell': { params: RetellRequest, return: RetellResult };
+    'practice/list-attempts': { params: PracticeAttemptQuery, return: PracticeAttemptSummary[] };
+    'practice/sentence-audio': {
+        params: { source: ShadowingAttemptSource },
+        return: string
+    };
+}
+
+/** 场景对话 IPC 定义。 */
+interface DialogueDef {
+    'dialogue/availability': { params: void, return: DialogueAvailability };
+    'dialogue/create': { params: DialogueCreateRequest, return: DialogueCreateResult };
+    'dialogue/transcribe': { params: DialogueTranscribeRequest, return: DialogueTranscribeResult };
+    'dialogue/append-turn': { params: DialogueAppendTurnRequest, return: DialogueAppendTurnResult };
+    'dialogue/finish': { params: DialogueFinishRequest, return: DialogueFinishResult };
+    'dialogue/list': { params: DialogueListQuery, return: DialogueSessionSummary[] };
+    'dialogue/detail': { params: { sessionId: number }, return: DialogueDetail };
+}
+
+/** 学习台 IPC 定义。 */
+interface DashboardDef {
+    'dashboard/summary': { params: void, return: DashboardSummary };
+}
+
+/** 间隔复习 IPC 定义。 */
+interface SrsDef {
+    'srs/add-card': { params: SrsAddCardRequest, return: SrsAddCardResponse };
+    'srs/overview': { params: void, return: SrsOverview };
+    'srs/submit-review': { params: SrsSubmitReviewRequest, return: SrsReviewOutcome };
+    'srs/remove-card': { params: { cardId: number }, return: void };
+    'srs/sentence-audio': { params: { cardId: number }, return: string };
+}
+
 interface DubbingDef {
     'dubbing/save-take': {
         params: {
@@ -522,7 +617,12 @@ export type ApiDefinitions = ApiDefinition
     & TagDef
     & VocabularyDef
     & VideoLearningDef
-    & DubbingDef;
+    & DubbingDef
+    & ShadowingDef
+    & SrsDef
+    & DashboardDef
+    & PracticeDef
+    & DialogueDef;
 
 // 更新 ApiMap 类型以使用 CombinedApiDefinitions
 export type ApiMap = {

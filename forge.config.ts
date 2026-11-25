@@ -306,7 +306,7 @@ const config: ForgeConfig = {
         // 打包版配音录音会报"麦克风权限被拒绝"（开发环境用的是 Electron 壳自身的授权，
         // 所以只在安装包里复现）。用途文案会原样显示在系统弹框里。
         extendInfo: {
-            NSMicrophoneUsageDescription: 'DashPlayer 需要使用麦克风录制配音音频。',
+            NSMicrophoneUsageDescription: 'DashPlayer 需要使用麦克风录制配音与跟读音频。',
         },
         extraResource: ['./drizzle', './lib', './scripts', './resources'],
         // Linux 命名统一为不带横杠的 dashplayer：此处 executableName、各 Linux maker 的

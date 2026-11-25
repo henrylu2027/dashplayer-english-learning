@@ -1,5 +1,10 @@
 {
+    "dashboard": "Dashboard",
     "playbackLab": "Immersive Player",
+    "shadowing": "Shadow Reading",
+    "reviewPlan": "Spaced Review",
+    "practice": "Dictation & Retell",
+    "dialogue": "Scene Dialogue",
     "savedMoments": "Saved Clips",
     "subtitleWorkspace": "Subtitle Generator",
     "sentenceSplitter": "Split Long Videos",

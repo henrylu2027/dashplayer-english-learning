@@ -1,0 +1,527 @@
+import { randomUUID } from 'node:crypto';
+import { inject, injectable } from 'inversify';
+import { generateObject } from 'ai';
+import { z } from 'zod';
+import { getMainLogger } from '@/backend/infrastructure/logger';
+import TYPES from '@/backend/ioc/types';
+import type AiProviderService from '@/backend/services/AiProviderService';
+import { CLOUD_AI_NOT_CONFIGURED_MESSAGE } from '@/backend/services/AiProviderService';
+import type ModelRoutingService from '@/backend/services/ModelRoutingService';
+import type LocalAiService from '@/backend/services/LocalAiService';
+import type ChatSessionService from '@/backend/services/ChatSessionService';
+import type RecordedSpeechService from '@/backend/services/speech/RecordedSpeechService';
+import type DialogueRepository from '@/backend/services/repositories/DialogueRepository';
+import {
+    DIALOGUE_BACKENDS,
+    DIALOGUE_DIFFICULTIES,
+    DIALOGUE_ROLES,
+    dialogueReviewDraftSchema,
+    dialogueSceneSchema,
+    type DialogueAvailability,
+    type DialogueCreateRequest,
+    type DialogueCreateResult,
+    type DialogueDetail,
+    type DialogueFinishRequest,
+    type DialogueFinishResult,
+    type DialogueListQuery,
+    type DialogueModelBackend,
+    type DialogueReview,
+    type DialogueReviewDraft,
+    type DialogueScene,
+    type DialogueSessionSummary,
+    type DialogueStats,
+    type DialogueTranscribeRequest,
+    type DialogueTranscribeResult,
+    type DialogueTurnVO,
+    type DialogueAppendTurnRequest,
+    type DialogueAppendTurnResult,
+} from '@/common/contracts/dialogue';
+import { normalizeShadowingSource } from '@/backend/services/shadowing/ShadowingSource';
+import { normalizeWord, tokenizeForScoring } from '@/common/utils/wordTokens';
+import {
+    buildDialogueSystemPrompt,
+    buildReviewPrompt,
+    buildScenePrompt,
+} from '@/backend/services/dialogue/DialoguePromptBuilder';
+
+/**
+ * 场景对话业务契约。
+ */
+export default interface DialogueService {
+    /** 查询本地与云端模型各自是否可用。 */
+    availability(): Promise<DialogueAvailability>;
+
+    /**
+     * 基于视频台词生成场景并创建对话。
+     *
+     * @param request 锚点台词、上下文、来源、难度与模型后端。
+     * @returns 已落库的会话摘要与场景卡。
+     * @throws 台词为空/过长、未绑定视频句或场景生成失败时抛出。
+     */
+    create(request: DialogueCreateRequest): Promise<DialogueCreateResult>;
+
+    /**
+     * 把录音转写成文字，供学习者确认后再发送。
+     *
+     * @param request 录音字节与 MIME 类型。
+     * @returns 识别文本与音频时长。
+     * @throws 录音为空/过大或识别失败时抛出。
+     */
+    transcribe(request: DialogueTranscribeRequest): Promise<DialogueTranscribeResult>;
+
+    /**
+     * 追加一条已完成的消息。
+     *
+     * @param request 会话、角色、内容与可选卡片 ID。
+     * @returns 落库后的回合。
+     * @throws 会话不存在或已结束时抛出。
+     */
+    appendTurn(request: DialogueAppendTurnRequest): Promise<DialogueAppendTurnResult>;
+
+    /**
+     * 结束对话并生成复盘；已复盘时幂等返回原结果。
+     *
+     * @param request 会话 ID。
+     * @returns 会话摘要与复盘。
+     * @throws 没有学习者发言或复盘生成失败时抛出。
+     */
+    finish(request: DialogueFinishRequest): Promise<DialogueFinishResult>;
+
+    /** 查询最近的对话。 */
+    list(query?: DialogueListQuery): Promise<DialogueSessionSummary[]>;
+
+    /** 读取一条对话的完整详情。 */
+    detail(sessionId: number): Promise<DialogueDetail>;
+}
+
+/** 历史列表默认与最大条数。 */
+const DEFAULT_LIST_LIMIT = 20;
+const MAX_LIST_LIMIT = 50;
+
+/** 锚点台词最大词数；过长会导致场景失焦。 */
+const MAX_ANCHOR_WORDS = 120;
+
+/** 单条消息最大字符数，兜住异常粘贴。 */
+const MAX_TURN_CHARS = 4000;
+
+/** 周边上下文最多保留的行数。 */
+const MAX_CONTEXT_LINES = 6;
+
+/**
+ * 把文本归一化为用于目标表达匹配的字符串。
+ * @param text 原始文本。
+ * @returns 小写、去标点、空格分隔的文本。
+ */
+const normalizePhrase = (text: string): string => tokenizeForScoring(text)
+    .map(normalizeWord)
+    .filter((word) => word.length > 0)
+    .join(' ');
+
+/**
+ * 场景对话服务：场景生成、消息转写、复盘与持久化。
+ *
+ * 说明：对话本身复用 ChatSessionService 的流式会话；本服务只负责
+ * 场景与复盘的结构化生成、客观统计和落库，不参与逐 token 的流式转发。
+ */
+@injectable()
+export class DialogueServiceImpl implements DialogueService {
+    private readonly logger = getMainLogger('DialogueService');
+
+    @inject(TYPES.DialogueRepository)
+    private dialogueRepository!: DialogueRepository;
+
+    @inject(TYPES.ChatSessionService)
+    private chatSessionService!: ChatSessionService;
+
+    @inject(TYPES.AiProviderService)
+    private aiProviderService!: AiProviderService;
+
+    @inject(TYPES.ModelRoutingService)
+    private modelRoutingService!: ModelRoutingService;
+
+    @inject(TYPES.LocalAiService)
+    private localAiService!: LocalAiService;
+
+    @inject(TYPES.RecordedSpeechService)
+    private recordedSpeechService!: RecordedSpeechService;
+
+    public async availability(): Promise<DialogueAvailability> {
+        const status = await this.localAiService.getStatus();
+        const active = status.models.find((model) => model.modelId === status.activeModelId);
+        const localAvailable = status.runtimeReady && active?.ready === true;
+        let localReason: string | null = null;
+        if (!status.runtimeReady) {
+            localReason = '本地推理运行时缺失，请重新安装应用或运行下载脚本';
+        } else if (!active) {
+            localReason = '本地模型未安装';
+        } else if (!active.ready) {
+            localReason = '本地模型未下载完成';
+        }
+
+        let cloudAvailable = false;
+        let cloudReason: string | null = null;
+        try {
+            cloudAvailable = this.aiProviderService.getModel('sentenceLearning') !== null;
+        } catch (error) {
+            cloudReason = error instanceof Error ? error.message : String(error);
+        }
+        if (!cloudAvailable && !cloudReason) {
+            cloudReason = '云端模型未配置，请到「设置 → 服务与资源」填写';
+        }
+        return {
+            local: { available: localAvailable, reason: localReason },
+            cloud: { available: cloudAvailable, reason: cloudReason },
+        };
+    }
+
+    public async create(request: DialogueCreateRequest): Promise<DialogueCreateResult> {
+        const anchorText = request.anchorText.trim();
+        const anchorWordCount = tokenizeForScoring(anchorText).length;
+        if (anchorWordCount === 0) {
+            throw new Error('请先播放到一句有字幕的视频台词');
+        }
+        if (anchorWordCount > MAX_ANCHOR_WORDS) {
+            throw new Error(`当前句过长（${anchorWordCount} 词），请选择更短的一句`);
+        }
+        if (!DIALOGUE_DIFFICULTIES.includes(request.difficulty)) {
+            throw new Error(`未知的场景难度：${String(request.difficulty)}`);
+        }
+        if (!DIALOGUE_BACKENDS.includes(request.backend)) {
+            throw new Error(`未知的模型后端：${String(request.backend)}`);
+        }
+        const source = normalizeShadowingSource(request.source);
+        if (source.kind !== 'video' || !source.videoKey || source.sentenceIndex === undefined) {
+            throw new Error('场景对话必须绑定视频句，请在播放器中播放到目标台词');
+        }
+        const paragraphLines = request.paragraphLines
+            .map((line) => line.trim())
+            .filter((line) => line.length > 0)
+            .slice(0, MAX_CONTEXT_LINES);
+
+        if (request.backend === 'local') {
+            this.localAiService.beginDialogueSession();
+        }
+        let chatSessionId: string | null = null;
+        try {
+            const scene = await this.generateScene({
+                anchorText,
+                paragraphLines,
+                difficulty: request.difficulty,
+                backend: request.backend,
+            });
+            const systemPrompt = buildDialogueSystemPrompt({ scene, difficulty: request.difficulty });
+            chatSessionId = this.chatSessionService.create({
+                videoId: source.videoKey,
+                originalTopic: anchorText,
+                paragraphLines,
+                subtitleFileHash: source.videoKey,
+                anchorSentenceIndex: source.sentenceIndex,
+                mode: 'scenario-dialogue',
+                backend: request.backend,
+                systemPrompt,
+            }).sessionId;
+            const created = await this.dialogueRepository.createSession({
+                chatSessionId,
+                source,
+                anchorText,
+                scene,
+                difficulty: request.difficulty,
+                backend: request.backend,
+            });
+            await this.dialogueRepository.appendTurn({
+                sessionId: created.session.id,
+                role: 'assistant',
+                content: scene.openingLineEn,
+            });
+            const record = await this.dialogueRepository.getSession(created.session.id);
+            this.logger.info('dialogue created', {
+                sessionId: record.session.id,
+                backend: request.backend,
+                difficulty: request.difficulty,
+                targetCount: scene.targetExpressions.length,
+            });
+            return { session: record.session, scene };
+        } catch (error) {
+            if (chatSessionId) {
+                this.closeChatSession(chatSessionId);
+            }
+            if (request.backend === 'local') {
+                this.localAiService.endDialogueSession();
+            }
+            throw error;
+        }
+    }
+
+    public async transcribe(request: DialogueTranscribeRequest): Promise<DialogueTranscribeResult> {
+        const job = `dialogue:${randomUUID()}`;
+        const speech = await this.recordedSpeechService.transcribe({
+            audio: request.audio,
+            mimeType: request.mimeType,
+            job,
+        });
+        this.logger.info('dialogue speech transcribed', {
+            job,
+            textLength: speech.text.length,
+            durationSec: Math.round(speech.durationSec * 100) / 100,
+        });
+        return { text: speech.text, durationSec: speech.durationSec };
+    }
+
+    public async appendTurn(request: DialogueAppendTurnRequest): Promise<DialogueAppendTurnResult> {
+        if (!DIALOGUE_ROLES.includes(request.role)) {
+            throw new Error(`未知的对话角色：${String(request.role)}`);
+        }
+        const content = request.content.trim();
+        if (content.length === 0) {
+            throw new Error('对话内容不能为空');
+        }
+        if (content.length > MAX_TURN_CHARS) {
+            throw new Error(`单条消息过长，请控制在 ${MAX_TURN_CHARS} 字以内`);
+        }
+        const record = await this.dialogueRepository.getSession(request.sessionId);
+        if (record.session.finishedAt !== null) {
+            throw new Error('对话已结束，不能再追加消息');
+        }
+        const turn = await this.dialogueRepository.appendTurn({
+            sessionId: request.sessionId,
+            role: request.role,
+            content,
+            cardId: request.cardId ?? null,
+        });
+        return { turn };
+    }
+
+    public async finish(request: DialogueFinishRequest): Promise<DialogueFinishResult> {
+        const record = await this.dialogueRepository.getSession(request.sessionId);
+        if (record.review) {
+            // 幂等：重复点「结束并复盘」不重复调用模型，也不再释放一次租约
+            return { session: record.session, review: record.review };
+        }
+        const turns = await this.dialogueRepository.listTurns(request.sessionId);
+        const userTurns = turns.filter((turn) => turn.role === 'user');
+        if (userTurns.length === 0) {
+            throw new Error('还没有对话内容，先回应一句再复盘');
+        }
+        const stats = this.computeStats(record.scene, turns);
+        const usedExpressions = record.scene.targetExpressions.map((item) => ({
+            en: item.en,
+            used: this.isExpressionUsed(item.en, userTurns.map((turn) => turn.content)),
+        }));
+        const { draft, reviewer } = await this.generateReview({
+            scene: record.scene,
+            turns,
+            stats,
+            backend: record.session.backend,
+        });
+        const suggestions = this.filterSuggestions(draft.suggestions, userTurns);
+        if (suggestions.length !== draft.suggestions.length) {
+            this.logger.info('dialogue suggestions filtered', {
+                total: draft.suggestions.length,
+                kept: suggestions.length,
+            });
+        }
+        const review: DialogueReview = {
+            summaryZh: draft.summaryZh,
+            suggestions,
+            goodLines: draft.goodLines,
+            usedExpressions,
+            stats,
+            reviewer,
+        };
+        const finished = await this.dialogueRepository.finishSession(request.sessionId, review);
+        if (record.session.backend === 'local') {
+            this.localAiService.endDialogueSession();
+        }
+        this.closeChatSession(record.session.chatSessionId);
+        this.logger.info('dialogue finished', {
+            sessionId: request.sessionId,
+            userTurnCount: stats.userTurnCount,
+            suggestionCount: review.suggestions.length,
+            goodLineCount: review.goodLines.length,
+            reviewerBackend: reviewer.backend,
+        });
+        return { session: finished.session, review };
+    }
+
+    public async list(query: DialogueListQuery = {}): Promise<DialogueSessionSummary[]> {
+        const limit = query.limit ?? DEFAULT_LIST_LIMIT;
+        if (!Number.isInteger(limit) || limit < 1 || limit > MAX_LIST_LIMIT) {
+            throw new Error(`对话记录条数必须在 1~${MAX_LIST_LIMIT} 之间`);
+        }
+        return this.dialogueRepository.listSessions(limit);
+    }
+
+    public async detail(sessionId: number): Promise<DialogueDetail> {
+        const record = await this.dialogueRepository.getSession(sessionId);
+        const turns = await this.dialogueRepository.listTurns(sessionId);
+        return {
+            session: record.session,
+            scene: record.scene,
+            turns,
+            review: record.review,
+        };
+    }
+
+    /**
+     * 生成场景卡：本地走 llama-server 的结构化生成，云端走 generateObject。
+     * @param params 锚点、上下文、难度与后端。
+     * @returns 通过 schema 校验的场景卡。
+     */
+    private async generateScene(params: {
+        anchorText: string;
+        paragraphLines: string[];
+        difficulty: DialogueCreateRequest['difficulty'];
+        backend: DialogueModelBackend;
+    }): Promise<DialogueScene> {
+        const prompt = buildScenePrompt(params);
+        if (params.backend === 'local') {
+            const modelId = await this.localAiService.getActiveModelId();
+            const raw = await this.localAiService.generate(
+                prompt,
+                z.toJSONSchema(dialogueSceneSchema),
+                modelId,
+            );
+            return dialogueSceneSchema.parse(raw);
+        }
+        const model = this.aiProviderService.getModel('sentenceLearning');
+        if (!model) {
+            throw new Error(CLOUD_AI_NOT_CONFIGURED_MESSAGE);
+        }
+        const result = await generateObject({ model, schema: dialogueSceneSchema, prompt });
+        return result.object;
+    }
+
+    /**
+     * 生成复盘点评。
+     * @param params 场景、回合、统计与后端。
+     * @returns 通过 schema 校验的点评草稿与模型来源。
+     */
+    private async generateReview(params: {
+        scene: DialogueScene;
+        turns: DialogueTurnVO[];
+        stats: DialogueStats;
+        backend: DialogueModelBackend;
+    }): Promise<{ draft: DialogueReviewDraft; reviewer: DialogueReview['reviewer'] }> {
+        const prompt = buildReviewPrompt(params);
+        if (params.backend === 'local') {
+            const modelId = await this.localAiService.getActiveModelId();
+            const raw = await this.localAiService.generate(
+                prompt,
+                z.toJSONSchema(dialogueReviewDraftSchema),
+                modelId,
+            );
+            return {
+                draft: dialogueReviewDraftSchema.parse(raw),
+                reviewer: { backend: 'local', model: modelId },
+            };
+        }
+        const model = this.aiProviderService.getModel('sentenceLearning');
+        if (!model) {
+            throw new Error(CLOUD_AI_NOT_CONFIGURED_MESSAGE);
+        }
+        const routed = this.modelRoutingService.resolveOpenAiModel('sentenceLearning');
+        if (!routed) {
+            throw new Error(CLOUD_AI_NOT_CONFIGURED_MESSAGE);
+        }
+        const result = await generateObject({ model, schema: dialogueReviewDraftSchema, prompt });
+        return {
+            draft: result.object,
+            reviewer: { backend: 'cloud', model: routed.modelId },
+        };
+    }
+
+    /**
+     * 过滤模型编造或重复的逐句建议。
+     *
+     * 说明：判断依据是学习者原话——建议的原句至少要有八成词出现在某一条学习者发言里，
+     * 否则视为引用错误或编造；同一原句只保留一条，改写后与原句相同的也丢弃。
+     * 小模型容易把 AI 台词当学习者的句子，这道约束比反复强调提示词更可靠。
+     *
+     * @param suggestions 模型返回的建议。
+     * @param userTurns 学习者全部发言。
+     * @returns 可展示的建议。
+     */
+    private filterSuggestions(
+        suggestions: DialogueReviewDraft['suggestions'],
+        userTurns: DialogueTurnVO[],
+    ): DialogueReviewDraft['suggestions'] {
+        const seen = new Set<string>();
+        return suggestions.filter((item) => {
+            const original = normalizePhrase(item.original);
+            const better = normalizePhrase(item.better);
+            if (original.length === 0 || original === better) {
+                return false;
+            }
+            if (seen.has(original)) {
+                return false;
+            }
+            const tokens = original.split(' ');
+            const covered = userTurns.some((turn) => {
+                const turnTokens = new Set(normalizePhrase(turn.content).split(' '));
+                const hitCount = tokens.filter((token) => turnTokens.has(token)).length;
+                return tokens.length > 0 && hitCount / tokens.length >= 0.8;
+            });
+            if (!covered) {
+                return false;
+            }
+            seen.add(original);
+            return true;
+        });
+    }
+
+    /**
+     * 计算客观统计：发言轮数、词数与平均每轮词数。
+     * @param scene 场景卡。
+     * @param turns 全部回合。
+     */
+    private computeStats(scene: DialogueScene, turns: DialogueTurnVO[]): DialogueStats {
+        const userTurns = turns.filter((turn) => turn.role === 'user');
+        const wordCounts = userTurns.map((turn) => tokenizeForScoring(turn.content).length);
+        const userWordCount = wordCounts.reduce((total, count) => total + count, 0);
+        const avgWordsPerTurn = userTurns.length === 0
+            ? 0
+            : Math.round((userWordCount / userTurns.length) * 10) / 10;
+        const userText = userTurns.map((turn) => normalizePhrase(turn.content)).join(' ');
+        const targetUsedCount = scene.targetExpressions
+            .filter((item) => {
+                const phrase = normalizePhrase(item.en);
+                return phrase.length > 0 && userText.includes(phrase);
+            })
+            .length;
+        return {
+            userTurnCount: userTurns.length,
+            userWordCount,
+            avgWordsPerTurn,
+            targetUsedCount,
+            targetTotalCount: scene.targetExpressions.length,
+        };
+    }
+
+    /**
+     * 判断目标表达是否出现在学习者发言里。
+     * @param expression 目标表达英文。
+     * @param contents 学习者全部发言。
+     */
+    private isExpressionUsed(expression: string, contents: string[]): boolean {
+        const phrase = normalizePhrase(expression);
+        if (phrase.length === 0) {
+            return false;
+        }
+        return contents.some((content) => normalizePhrase(content).includes(phrase));
+    }
+
+    /**
+     * 关闭内存中的聊天会话；会话已随重启丢失时只记日志，不影响已落库的复盘。
+     * @param chatSessionId 聊天会话 ID。
+     */
+    private closeChatSession(chatSessionId: string): void {
+        try {
+            this.chatSessionService.close(chatSessionId);
+        } catch (error) {
+            this.logger.warn('close dialogue chat session failed', {
+                chatSessionId,
+                error: error instanceof Error ? error.message : String(error),
+            });
+        }
+    }
+}

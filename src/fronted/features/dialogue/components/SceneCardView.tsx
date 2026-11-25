@@ -1,0 +1,58 @@
+import { useTranslation } from 'react-i18next';
+import { Volume2 } from 'lucide-react';
+
+import type { DialogueScene } from '@/common/contracts/dialogue';
+
+/**
+ * 场景卡：设定、双方角色与目标表达。
+ *
+ * @param props.scene 场景卡。
+ * @param props.onSpeak 朗读目标表达。
+ */
+export default function SceneCardView({
+    scene,
+    onSpeak,
+}: {
+    scene: DialogueScene;
+    onSpeak: (text: string) => void;
+}) {
+    const { t } = useTranslation('pages');
+    return (
+        <section className="flex flex-col gap-3 rounded-2xl border border-border/60 bg-card p-5 shadow-xs">
+            <div>
+                <div className="text-[11px] uppercase tracking-wide text-muted-foreground">{t('dialogue.sceneTitle')}</div>
+                <h2 className="mt-0.5 text-base font-medium text-foreground">{scene.title}</h2>
+                <p className="mt-1 text-sm leading-6 text-foreground/80">{scene.settingZh}</p>
+            </div>
+
+            <div className="grid gap-2 text-sm sm:grid-cols-2">
+                <div className="rounded-xl bg-muted/50 px-3 py-2">
+                    <div className="text-[11px] text-muted-foreground">{t('dialogue.aiRole')}</div>
+                    <div className="mt-0.5 text-foreground/90">{scene.aiRole}</div>
+                </div>
+                <div className="rounded-xl bg-muted/50 px-3 py-2">
+                    <div className="text-[11px] text-muted-foreground">{t('dialogue.userRole')}</div>
+                    <div className="mt-0.5 text-foreground/90">{scene.userRole}</div>
+                </div>
+            </div>
+
+            <div>
+                <div className="mb-1.5 text-xs text-muted-foreground">{t('dialogue.targets')}</div>
+                <div className="flex flex-wrap gap-1.5">
+                    {scene.targetExpressions.map((item) => (
+                        <button
+                            key={item.en}
+                            type="button"
+                            onClick={() => onSpeak(item.en)}
+                            className="group flex items-center gap-1.5 rounded-full border border-border/60 px-2.5 py-1 text-xs text-foreground/80 transition-colors hover:border-border hover:text-foreground"
+                        >
+                            <span>{item.en}</span>
+                            <span className="text-muted-foreground">{item.zh}</span>
+                            <Volume2 className="h-3 w-3 opacity-0 transition-opacity group-hover:opacity-100" />
+                        </button>
+                    ))}
+                </div>
+            </div>
+        </section>
+    );
+}

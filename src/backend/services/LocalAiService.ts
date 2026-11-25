@@ -1,3 +1,4 @@
+import type { LanguageModel } from 'ai';
 import type { LocalAiSpeedTestResult, LocalAiStatus } from '@/common/contracts/local-ai';
 
 /**
@@ -58,6 +59,29 @@ export default interface LocalAiService {
      * @param options 可选生成约束（GBNF 语法等）。
      */
     generateText(prompt: string, modelId: string, signal?: AbortSignal, options?: LocalGenerateTextOptions): Promise<string>;
+    /**
+     * 获取可流式调用的本地语言模型。
+     *
+     * 说明：内部确保 llama-server 已启动并返回指向它的 AI SDK 模型，
+     * 供场景对话复用现有流式对话管线；调用方需自行持有对话租约，避免中途被空闲卸载。
+     *
+     * @returns 指向当前使用中模型的 LanguageModel。
+     * @throws 模型未安装、运行时缺失或启动失败时抛出。
+     */
+    getLanguageModel(): Promise<LanguageModel>;
+
+    /**
+     * 开始一段场景对话，对话期间本地模型常驻内存。
+     *
+     * 说明：与字幕翻译/词典的常驻判断合并；重复开始与结束按计数配平。
+     */
+    beginDialogueSession(): void;
+
+    /**
+     * 结束一段场景对话；没有剩余对话时恢复空闲自动卸载策略。
+     */
+    endDialogueSession(): void;
+
     /** 中止下载、推理并等待子进程退出。 */
     shutdown(): Promise<void>;
 }

@@ -1,10 +1,11 @@
 import { randomUUID } from 'node:crypto';
 import { injectable } from 'inversify';
 import type { ModelMessage } from 'ai';
-import type { ChatSessionCreateParams } from '@/common/types/chat';
+import type { ChatSessionCreateParams, ChatSessionMode } from '@/common/types/chat';
+import type { DialogueModelBackend } from '@/common/contracts/dialogue';
 
 /**
- * 内存中的一次整句学习会话。
+ * 内存中的一次聊天会话。
  */
 export type ChatSession = {
     /** 后端生成的会话标识。 */
@@ -19,6 +20,12 @@ export type ChatSession = {
     subtitleFileHash: string;
     /** 当前学习句在字幕缓存中的索引。 */
     anchorSentenceIndex: number;
+    /** 会话模式。 */
+    mode: ChatSessionMode;
+    /** 对话使用的模型后端；整句学习固定为 cloud。 */
+    backend: DialogueModelBackend;
+    /** 对话模式的系统人设；整句学习为 null。 */
+    systemPrompt: string | null;
     /** 已完成并可用于后续请求的模型消息历史。 */
     messages: ModelMessage[];
     /** 当前会话是否已关闭。 */
@@ -53,6 +60,14 @@ export class InMemoryChatSessionStore implements ChatSessionStore {
      * @returns 新创建的会话。
      */
     public create(params: ChatSessionCreateParams): ChatSession {
+        const mode = params.mode ?? 'sentence-learning';
+        if (mode === 'scenario-dialogue' && !params.systemPrompt?.trim()) {
+            throw new Error('场景对话会话缺少系统人设');
+        }
+        if (mode === 'sentence-learning' && params.systemPrompt !== undefined) {
+            // 整句学习的人设由 ensureChatRoleMessage 统一注入，避免两套人设同时存在
+            throw new Error('整句学习会话不允许自定义系统人设');
+        }
         const id = randomUUID();
         const session: ChatSession = {
             id,
@@ -61,6 +76,9 @@ export class InMemoryChatSessionStore implements ChatSessionStore {
             paragraphLines: [...params.paragraphLines],
             subtitleFileHash: params.subtitleFileHash,
             anchorSentenceIndex: params.anchorSentenceIndex,
+            mode,
+            backend: mode === 'scenario-dialogue' ? (params.backend ?? 'cloud') : 'cloud',
+            systemPrompt: mode === 'scenario-dialogue' ? params.systemPrompt!.trim() : null,
             // 历史从首轮用户消息开始：面板打开时的结构化解析走独立调用，不占用对话历史。
             messages: [],
             closed: false,

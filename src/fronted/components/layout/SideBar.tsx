@@ -5,7 +5,7 @@ import logoLight from '../../../../assets/logo-light.png';
 import logoDark from '../../../../assets/logo-dark.png';
 import useFile from '@/fronted/features/file-browser/fileStore';
 import useSetting from '@/fronted/features/settings/settingsStore';
-import { AudioLines, BookOpen, Captions, Rotate3D, Settings, SquareSplitHorizontal, Star, Video } from 'lucide-react';
+import { AudioLines, BookOpen, Captions, LayoutDashboard, MessagesSquare, Mic, PencilLine, Repeat, Rotate3D, Settings, SquareSplitHorizontal, Star, Video } from 'lucide-react';
 import { useTranslation as useI18nTranslation } from 'react-i18next';
 
 export interface SideBarProps {
@@ -78,10 +78,40 @@ const SideBar = ({ compact }: SideBarProps) => {
             <div className={cn('basis-3/4 flex flex-col p-3 gap-1')}>
                 {/* {item('Home', '/home', 'home', <HiOutlineHome />)} */}
                 {item(
+                    t('dashboard'),
+                    '/dashboard',
+                    'dashboard',
+                    <LayoutDashboard />
+                )}
+                {item(
                     t('playbackLab'),
                     `/player/${videoId}?sideBarAnimation=false`,
                     'pa-player',
                     <Video />
+                )}
+                {item(
+                    t('shadowing'),
+                    '/shadowing',
+                    'shadowing',
+                    <Mic />
+                )}
+                {item(
+                    t('reviewPlan'),
+                    '/review',
+                    'review',
+                    <Repeat />
+                )}
+                {item(
+                    t('practice'),
+                    '/practice',
+                    'practice',
+                    <PencilLine />
+                )}
+                {item(
+                    t('dialogue'),
+                    '/dialogue',
+                    'dialogue',
+                    <MessagesSquare />
                 )}
                 {item(
                     t('savedMoments'),

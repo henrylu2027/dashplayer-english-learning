@@ -8,6 +8,8 @@ import { pipeline } from 'node:stream/promises';
 import { setTimeout as delay } from 'node:timers/promises';
 import axios, { isAxiosError, isCancel } from 'axios';
 import { z } from 'zod';
+import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
+import type { LanguageModel } from 'ai';
 import TYPES from '@/backend/ioc/types';
 import type LocalAiService from '@/backend/services/LocalAiService';
 import type { LocalGenerateTextOptions } from '@/backend/services/LocalAiService';
@@ -92,6 +94,8 @@ export class LocalAiRuntime implements LocalAiService {
     private downloaded = 0;
     /** 每个模型最近一次下载失败原因；成功后清除，切页后仍可查看。 */
     private readonly modelErrors = new Map<string, string>();
+    /** 正在进行的场景对话数量；大于 0 时本地模型常驻，避免对话中途被空闲卸载。 */
+    private dialogueLeases = 0;
     private lastProgressAt = 0;
 
     /** 速度测试固定负载：5 句字幕批量翻译，与真实字幕批次同量级。 */
@@ -213,9 +217,15 @@ export class LocalAiRuntime implements LocalAiService {
         return false;
     }
 
-    /** 字幕翻译或词典任一引擎配置为本地模型即视为引擎启用；读设置即时生效，无需事件通知。 */
+    /**
+     * 字幕翻译、词典任一引擎配置为本地模型，或仍有场景对话进行中，即视为引擎启用。
+     *
+     * 说明：读设置即时生效，无需事件通知；对话租约由 DialogueService 在开始时加上、
+     * 结束时释放，保证对话中途不会因为翻译/词典未选本地而被空闲卸载。
+     */
     private isLocalEngineEnabled(): boolean {
-        return this.settingsStore.get('providers.subtitleTranslation') === 'local'
+        return this.dialogueLeases > 0
+            || this.settingsStore.get('providers.subtitleTranslation') === 'local'
             || this.settingsStore.get('providers.dictionary') === 'local';
     }
 
@@ -347,6 +357,45 @@ export class LocalAiRuntime implements LocalAiService {
         }
         // 常驻模式下后台切换到新模型；引擎未启用时不做任何加载。
         if (this.isLocalEngineEnabled()) void this.preloadActiveModel();
+    }
+
+    /**
+     * 返回指向当前使用中本地模型的 AI SDK 模型，供场景对话流式调用。
+     *
+     * 说明：先按需启动 llama-server，再基于其 OpenAI 兼容接口构造模型；
+     * 每次调用都重新取端点，模型被重启后不会继续指向失效端口。
+     *
+     * @returns 可直接传给 streamText 的语言模型。
+     * @throws 模型未安装、运行时缺失或启动失败时抛出。
+     */
+    public async getLanguageModel(): Promise<LanguageModel> {
+        const modelId = await this.getActiveModelId();
+        const definition = await this.resolveModelDefinition(modelId);
+        const loadSignal = AbortSignal.any([this.lifetime.signal, AbortSignal.timeout(120_000)]);
+        const endpoint = await this.runSerial((signal) => this.start(definition, signal), loadSignal);
+        const provider = createOpenAICompatible({
+            name: 'dashplayer-local',
+            baseURL: `${endpoint}/v1`,
+            apiKey: this.apiKey,
+        });
+        return provider.chatModel(modelId);
+    }
+
+    /** 开始一段场景对话：本地模型在对话期间常驻，不参与空闲卸载。 */
+    public beginDialogueSession(): void {
+        this.dialogueLeases += 1;
+        this.syncEngineResidency();
+    }
+
+    /** 结束一段场景对话；租约归零后恢复原本的常驻/卸载策略。 */
+    public endDialogueSession(): void {
+        if (this.dialogueLeases === 0) {
+            // 没有对应租约说明调用方重复释放；记账但不让计数变负
+            this.logger.warn('dialogue lease released without matching acquire');
+            return;
+        }
+        this.dialogueLeases -= 1;
+        this.syncEngineResidency();
     }
 
     /** 启动指定模型的下载并保留唯一任务；错误保存在状态中，切页后仍可查看。 */

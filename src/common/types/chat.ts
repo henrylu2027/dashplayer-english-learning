@@ -1,7 +1,16 @@
 import type { UIMessageChunk } from 'ai';
+import type { DialogueModelBackend } from '@/common/contracts/dialogue';
 
 /**
- * 创建整句学习会话所需的稳定上下文快照。
+ * 会话模式。
+ *
+ * - `sentence-learning`：播放器内的整句学习，带字幕检索工具与学习人设；
+ * - `scenario-dialogue`：场景对话，按场景卡人设作答，不挂字幕工具。
+ */
+export type ChatSessionMode = 'sentence-learning' | 'scenario-dialogue';
+
+/**
+ * 创建聊天会话所需的稳定上下文快照。
  */
 export type ChatSessionCreateParams = {
     /** 当前视频 ID，用于在内存中按视频归组。 */
@@ -14,6 +23,12 @@ export type ChatSessionCreateParams = {
     subtitleFileHash: string;
     /** 当前学习句在字幕缓存中的索引。 */
     anchorSentenceIndex: number;
+    /** 会话模式；缺省为整句学习。 */
+    mode?: ChatSessionMode;
+    /** 场景对话使用的模型后端；整句学习忽略该字段。 */
+    backend?: DialogueModelBackend;
+    /** 场景对话的系统人设；由场景卡生成，仅对话模式允许传入。 */
+    systemPrompt?: string;
 };
 
 /**
