@@ -122,6 +122,8 @@ interface ApiDefinition {
 // 定义额外的接口
 interface AiFuncDef {
     'ai-func/tts': { params: string, return: string };
+    /** 单个单词的真人美式发音；非单词、离线或源不可用时返回 null，由调用方退回本地 TTS。 */
+    'ai-func/word-audio': { params: string, return: string | null };
     'ai-func/format-split': { params: string, return: number };
 }
 

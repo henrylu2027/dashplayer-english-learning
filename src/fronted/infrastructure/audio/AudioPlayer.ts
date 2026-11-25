@@ -38,6 +38,24 @@ export const playWord = async (word: string) => {
     window.speechSynthesis.speak(utterance);
 };
 
+/**
+ * 取单个单词的真人美式发音（在线词典，本地缓存）。
+ *
+ * 只对单个英文单词有效；离线、非单词或接口异常时返回 null，
+ * 调用方应退回本地 TTS，不要静默无声。
+ *
+ * @param word 待朗读的单词。
+ * @returns 音频 URL 或 null。
+ */
+export const getWordAudioUrl = async (word: string): Promise<Nullable<string>> => {
+    try {
+        return await api.call('ai-func/word-audio', word);
+    } catch (error) {
+        getRendererLogger('AudioPlayer').warn('word audio failed', { error });
+        return null;
+    }
+};
+
 export const getTtsUrl = async (str: string) => {
     str = str.trim();
     if (StrUtil.isBlank(str)) {

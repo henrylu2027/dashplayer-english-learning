@@ -11,7 +11,7 @@ import {
 import toast from 'react-hot-toast';
 import { useTranslation } from 'react-i18next';
 import WordPop from './word-pop';
-import { playWord, getTtsUrl, playAudioUrl } from '@/fronted/infrastructure/audio/AudioPlayer';
+import { playWord, getTtsUrl, playAudioUrl, getWordAudioUrl } from '@/fronted/infrastructure/audio/AudioPlayer';
 import type { OpenAIDictionaryResult } from '@/common/types/DictionaryResult';
 import useSWR from 'swr';
 import Style from '@/fronted/styles/style';
@@ -304,11 +304,17 @@ const Word = ({word, original, lemma, pop, requestPop, show, alwaysDark, classNa
 
         setPlayLoading(true);
         try {
-            const ttsUrl = await getTtsUrl(word);
-            if (ttsUrl) {
-                await playAudioUrl(ttsUrl);
+            // 单词优先用词典的真人美式发音；取不到（离线/非单词）再退回本地 TTS
+            const wordUrl = await getWordAudioUrl(word);
+            if (wordUrl) {
+                await playAudioUrl(wordUrl);
             } else {
-                await playWord(word);
+                const ttsUrl = await getTtsUrl(word);
+                if (ttsUrl) {
+                    await playAudioUrl(ttsUrl);
+                } else {
+                    await playWord(word);
+                }
             }
         } catch (error) {
             logger.error('failed to play pronunciation', { error: error instanceof Error ? error.message : error });

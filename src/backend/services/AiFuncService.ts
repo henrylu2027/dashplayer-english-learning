@@ -1,3 +1,7 @@
+import * as crypto from 'node:crypto';
+import * as fs from 'node:fs';
+import * as os from 'node:os';
+import * as path from 'node:path';
 import type LocalTtsService from '@/backend/services/LocalTtsService';
 import type DpTaskService from '@/backend/services/DpTaskService';
 import type { TranscriptionService } from '@/backend/services/TranscriptionService';
@@ -24,6 +28,17 @@ export default interface AiFuncService {
     formatSplit(text: string): Promise<number>;
 
     tts(text: string): Promise<string>;
+
+    /**
+     * 取单个单词的真人美式发音。
+     *
+     * 只处理单个英文单词：多词短语在线词典接口不支持，直接返回 null
+     * 让调用方退回本地 TTS。网络不可用或接口异常同样返回 null，不抛错。
+     *
+     * @param text 待朗读的单词（可带标点）。
+     * @returns 音频文件 URL；取不到时为 null。
+     */
+    wordAudio(text: string): Promise<string | null>;
 
     listTranscriptionTasks(): Promise<TranscriptTask[]>;
 
@@ -89,6 +104,54 @@ export class AiFuncServiceImpl implements AiFuncService {
 
     public async tts(text: string): Promise<string> {
         return UrlUtil.toUrl(await this.localTtsService.synthesize(text));
+    }
+
+    /** 单词真人发音的本地缓存目录（%TEMP%/dp/word-audio）。 */
+    private static readonly WORD_AUDIO_DIR = path.join(os.tmpdir(), 'dp', 'word-audio');
+
+    public async wordAudio(text: string): Promise<string | null> {
+        // 去掉单词两侧的标点后再判断：字幕里的 "pocket," "phone?" 都要能取到词条
+        const word = text.trim().replace(/^[^A-Za-z]+|[^A-Za-z]+$/g, '');
+        // 在线词典接口只接受单个单词，短语会返回 500；短语交给本地 TTS
+        if (!/^[A-Za-z][A-Za-z'’-]*$/.test(word)) {
+            return null;
+        }
+        const key = crypto.createHash('sha1').update(word.toLowerCase()).digest('hex');
+        const target = path.join(AiFuncServiceImpl.WORD_AUDIO_DIR, `${key}.mp3`);
+        try {
+            await fs.promises.access(target);
+            return UrlUtil.toUrl(target);
+        } catch {
+            // 未缓存，继续联网获取
+        }
+        try {
+            const controller = new AbortController();
+            const timer = setTimeout(() => controller.abort(), 6000);
+            const response = await fetch(
+                `https://dict.youdao.com/dictvoice?audio=${encodeURIComponent(word)}&type=2`,
+                { signal: controller.signal },
+            );
+            clearTimeout(timer);
+            const contentType = response.headers.get('content-type') ?? '';
+            if (!response.ok || !contentType.startsWith('audio/')) {
+                this.logger.warn('word audio unavailable', { word, status: response.status, contentType });
+                return null;
+            }
+            const buffer = Buffer.from(await response.arrayBuffer());
+            if (buffer.byteLength < 512) {
+                return null;
+            }
+            await fs.promises.mkdir(AiFuncServiceImpl.WORD_AUDIO_DIR, { recursive: true });
+            await fs.promises.writeFile(target, buffer);
+            return UrlUtil.toUrl(target);
+        } catch (error) {
+            // 离线/超时都按"取不到"处理，前端会自动退回本地 TTS
+            this.logger.warn('word audio fetch failed', {
+                word,
+                error: error instanceof Error ? error.message : String(error),
+            });
+            return null;
+        }
     }
 
     /**
