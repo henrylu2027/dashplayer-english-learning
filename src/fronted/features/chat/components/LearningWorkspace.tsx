@@ -988,7 +988,10 @@ export default function LearningWorkspace({
                 className={cn(
                     'grid min-h-0 flex-1',
                     'grid-cols-1 grid-rows-[minmax(0,54%)_minmax(0,1fr)]',
-                    'lg:grid-cols-[minmax(320px,360px)_minmax(0,1fr)] lg:grid-rows-1'
+                    // 解析列按比例分配而不是固定 320~360px：学习页嵌在播放区里，
+                    // 窄窗口下固定宽度会把「对话」挤成一百来像素、一句话折成五六行。
+                    // 30% + 200px 下限：宽屏约 290px，窄屏收到 200px，对话始终占大头。
+                    'lg:grid-cols-[minmax(200px,30%)_minmax(0,1fr)] lg:grid-rows-1'
                 )}
             >
                 <AnalysisPane
