@@ -122,6 +122,13 @@ const doCheckUpdate = async (): Promise<UpdateCheckResult> => {
             return cache;
         }
 
+        // 私有仓库未授权时返回 404：这是预期状态，按"没有发布版本"处理，不提示网络错误。
+        if (status === 404) {
+            cache = { status: 'ok', releases: [] };
+            cacheExpireAt = Date.now() + UPDATE_CACHE_TTL_MS;
+            return cache;
+        }
+
         const rateLimited = status === 403 || status === 429;
         // 限流/网络失败均为可恢复的预期失败，按 warn 记录并带上 status/耗时便于归因。
         logger.warn(rateLimited ? 'github latest release rate limited' : 'failed to fetch latest release', {

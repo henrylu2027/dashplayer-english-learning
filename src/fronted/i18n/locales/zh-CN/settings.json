@@ -268,8 +268,8 @@
             "privacyDesc": "所有生词本、转录历史与收藏片段均保存在本机，安全无泄露风险。"
         },
         "links": {
-            "docs": "官方使用文档",
-            "docsDesc": "查看完整教程与快捷键指南",
+            "docs": "项目文档",
+            "docsDesc": "查看项目说明与使用教程",
             "github": "GitHub 仓库",
             "githubDesc": "欢迎提交 Issue、功能建议或 Star",
             "releases": "版本更新日志",

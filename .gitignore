@@ -114,3 +114,7 @@ worktrees/
 ios/build/
 ios/build-sim/
 ios/DashPlayerMobile.xcodeproj/
+
+# Electron Forge 打包产物（体积大，不入库）
+/out/
+/out-*/

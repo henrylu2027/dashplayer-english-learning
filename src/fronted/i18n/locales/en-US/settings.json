@@ -268,8 +268,8 @@
             "privacyDesc": "Vocabulary notes, transcription history, and saved clips stay completely on your machine."
         },
         "links": {
-            "docs": "Official Documentation",
-            "docsDesc": "Explore tutorials, workflows, and shortcut guides",
+            "docs": "Project Documentation",
+            "docsDesc": "Read the project notes and usage guide",
             "github": "GitHub Repository",
             "githubDesc": "Submit issues, suggest features, or star the project",
             "releases": "Release Notes",
