@@ -117,9 +117,9 @@ const PlaybackControlBar = ({
             onMouseLeave={onMouseLeave}
             style={{ bottom: maskAdjust.liftPx + CONTROL_BAR_GAP_PX }}
             className={cn(
-                // pb 从 32 收到 12：控制条整体下移 20px，压到画面下沿的空白带上，
-                // 少遮住画面里烧进视频的字幕
-                'w-full flex flex-col-reverse h-36 text-white/90 px-4 pb-3 pt-2 pointer-events-auto',
+                // 不再留底部内边距：控制条直接压到播放区底边（画面下沿的黑边），
+                // 与画面里烧进的字幕彻底分离，也不再悬在画面中间
+                'w-full flex flex-col-reverse h-36 text-white/90 px-4 pb-0 pt-2 pointer-events-auto',
                 'transition-[bottom] duration-200 ease-out',
                 className
             )}

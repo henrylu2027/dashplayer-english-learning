@@ -12,8 +12,13 @@ export const CONTROL_BAR_PANEL_HEIGHT_PX = 144;
 /** 全屏视图控制条面板高度（对应样式 `h-32`）。 */
 export const FULLSCREEN_CONTROL_BAR_PANEL_HEIGHT_PX = 128;
 
-/** 普通视图控制条与画面底部的间距（对应样式 `bottom-2`）。 */
-export const CONTROL_BAR_GAP_PX = 8;
+/**
+ * 普通视图控制条与播放区底部的间距。
+ *
+ * 取 2px 而不是原来的 8px：控制条要贴着播放区底边（也就是画面下沿的黑边）显示，
+ * 与画面里烧进的字幕拉开距离。面板本身不再有底部内边距（见 ControlBar 的 pb-0）。
+ */
+export const CONTROL_BAR_GAP_PX = 2;
 
 /** 控制条抬起时与画面顶部保留的余量（像素）：保证贴片再高也不会把条顶出画面。 */
 export const CONTROL_BAR_TOP_MARGIN_PX = 48;
