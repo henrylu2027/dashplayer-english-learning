@@ -13,7 +13,9 @@ const TitleBarLayout = () => {
                 'dark:bg-neutral-700'
             )}
         >
-            <TitleBar className="" />
+            {/* 顶边留一条整宽拖动带：无边框窗口没有系统标题栏，
+                不给这块区域就无法拖动窗口（上下左右都动不了） */}
+            <TitleBar className="top-0 left-0 w-full h-2.5 z-50" />
             <Suspense fallback={<div>{t('loading')}</div>}>
                 <div className={cn('flex-1 h-0 w-full')}>
                     <Outlet />

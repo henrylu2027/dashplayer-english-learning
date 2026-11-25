@@ -63,7 +63,9 @@ const SideBar = ({ compact }: SideBarProps) => {
         <div className={cn('w-full h-full flex flex-col text-black ')}>
             <div
                 className={cn(
-                    'flex-1 flex items-center justify-center min-h-fit py-10'
+                    // 顶部 logo 区兼作窗口拖动把手：无边框窗口页面里最顺手的抓手，
+                    // 面积大且这块区域没有可交互控件，不会抢点击
+                    'drag flex-1 flex items-center justify-center min-h-fit py-10'
                 )}
             >
                 <img

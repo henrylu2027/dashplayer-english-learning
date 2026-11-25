@@ -154,7 +154,8 @@ export default function ControlBox() {
 
   return (
     <Card className={cn('w-full h-full flex flex-col overflow-hidden rounded-2xl border border-border/70 bg-card shadow-2xs')}>
-      <CardHeader className="shrink-0 px-4 pt-3 pb-2">
+      {/* 标题行兼作窗口拖动把手：播放页顶部没有系统标题栏，这里是最顺手的抓手 */}
+      <CardHeader className="drag shrink-0 px-4 pt-3 pb-2 select-none">
         <CardTitle className="text-base font-semibold tracking-tight text-foreground">{t('controlBox.title')}</CardTitle>
       </CardHeader>
       
