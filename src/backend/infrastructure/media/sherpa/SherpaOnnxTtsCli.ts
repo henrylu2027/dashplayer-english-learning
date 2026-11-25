@@ -32,20 +32,36 @@ export class SherpaOnnxTtsCli {
      * @returns 生成的音频文件路径。
      */
     public async run(params: {
+        /** 模型族：Kokoro（自然但慢）或 Piper/VITS（快）。 */
+        family: 'kokoro' | 'vits';
         modelPath: string;
+        /** Kokoro 的音色表（voices.bin）；Piper 模型不需要。 */
+        voicesPath?: string;
         tokensPath: string;
         dataDir: string;
         outputPath: string;
         text: string;
+        /** 说话人编号；Kokoro 可选 0~N，Piper 只有 0。 */
+        speakerId?: number;
     }): Promise<string> {
         const executablePath = this.resolveExecutablePath();
-        const args = [
-            `--vits-model=${params.modelPath}`,
-            `--vits-tokens=${params.tokensPath}`,
-            `--vits-data-dir=${params.dataDir}`,
-            `--output-filename=${params.outputPath}`,
-            params.text,
-        ];
+        const args = params.family === 'kokoro'
+            ? [
+                `--kokoro-model=${params.modelPath}`,
+                `--kokoro-voices=${params.voicesPath ?? ''}`,
+                `--kokoro-tokens=${params.tokensPath}`,
+                `--kokoro-data-dir=${params.dataDir}`,
+                `--sid=${params.speakerId ?? 0}`,
+                `--output-filename=${params.outputPath}`,
+                params.text,
+            ]
+            : [
+                `--vits-model=${params.modelPath}`,
+                `--vits-tokens=${params.tokensPath}`,
+                `--vits-data-dir=${params.dataDir}`,
+                `--output-filename=${params.outputPath}`,
+                params.text,
+            ];
         await new Promise<void>((resolve, reject) => {
             const child = spawn(executablePath, args, {
                 cwd: path.dirname(executablePath),

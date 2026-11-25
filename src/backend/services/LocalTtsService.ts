@@ -1,3 +1,4 @@
+import * as fs from 'node:fs';
 import * as os from 'os';
 import * as path from 'path';
 import { inject, injectable } from 'inversify';
@@ -8,7 +9,28 @@ import type StorageDirectoryProvider from '@/backend/services/gateways/storage/S
 import { StorageDirectoryTarget } from '@/backend/services/gateways/storage/StorageDirectoryProvider';
 import TYPES from '@/backend/ioc/types';
 import { SherpaOnnxTtsCli } from '@/backend/infrastructure/media/sherpa/SherpaOnnxTtsCli';
-import type SherpaTtsModelService from '@/backend/services/SherpaTtsModelService';/** 句末标点判定（含中英文与引号/括号收尾）。 */
+import type SherpaTtsModelService from '@/backend/services/SherpaTtsModelService';/**
+ * Kokoro 模型目录名（可选安装）。
+ *
+ * Kokoro-82M 的音色接近真人，但 CPU 合成速度约为实时的 1.5 倍，
+ * 只用于单词/短语；整句继续用 Piper（lessac-medium）。
+ */
+const KOKORO_MODEL_DIRECTORY = 'kokoro-en-v0_19';
+
+/** 超过这个单词数就不走 Kokoro，避免整句等待过久。 */
+const KOKORO_MAX_WORDS = 4;
+
+/**
+ * 判断 Kokoro 是否完整安装。
+ * @param dir 模型目录。
+ * @returns 四个必需文件都在时为 true。
+ */
+const isKokoroInstalled = (dir: string): boolean => {
+    const required = ['model.onnx', 'voices.bin', 'tokens.txt', 'espeak-ng-data'];
+    return required.every((name) => fs.existsSync(path.join(dir, name)));
+};
+
+/** 句末标点判定（含中英文与引号/括号收尾）。 */
 const TERMINAL_PUNCTUATION = /[.!?。！？…]["')\]]*$/;
 
 /**
@@ -64,12 +86,30 @@ export class LocalTtsServiceImpl implements LocalTtsService {
         const outputDir = path.join(os.tmpdir(), 'dp', 'tts');
         await this.fileSystemGateway.ensureDirectory(outputDir);
         const outputPath = path.join(outputDir, `${Date.now()}-${Math.random().toString(36).slice(2)}.wav`);
+        const spoken = ensureTerminalPunctuation(text.trim());
+        const wordCount = spoken.split(/\s+/).filter((word) => word.length > 0).length;
+
+        // 短词优先用 Kokoro：音色接近真人，但合成速度约为实时的 1.5 倍，
+        // 只适合单词/短语；整句仍走 Piper，保证点一下马上出声。
+        const kokoroDir = path.join(modelsRoot, KOKORO_MODEL_DIRECTORY);
+        if (wordCount <= KOKORO_MAX_WORDS && isKokoroInstalled(kokoroDir)) {
+            return this.cli.run({
+                family: 'kokoro',
+                modelPath: path.join(kokoroDir, 'model.onnx'),
+                voicesPath: path.join(kokoroDir, 'voices.bin'),
+                tokensPath: path.join(kokoroDir, 'tokens.txt'),
+                dataDir: path.join(kokoroDir, 'espeak-ng-data'),
+                outputPath,
+                text: spoken,
+            });
+        }
         return this.cli.run({
+            family: 'vits',
             modelPath: path.join(modelDir, 'en_US-lessac-medium.onnx'),
             tokensPath: path.join(modelDir, 'tokens.txt'),
             dataDir: path.join(modelDir, 'espeak-ng-data'),
             outputPath,
-            text: ensureTerminalPunctuation(text.trim()),
+            text: spoken,
         });
     }
 }
