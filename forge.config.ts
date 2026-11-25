@@ -196,6 +196,8 @@ const adhocResignMacApp = async (packageResult: { platform: string; outputPaths:
 };
 
 const config: ForgeConfig = {
+    // 允许通过 FORGE_OUT_DIR 指定产物目录：旧产物被占用时可以用新目录构建。
+    outDir: process.env.FORGE_OUT_DIR || 'out',
     packagerConfig: {
         // `@electron-forge/plugin-vite` defaults to packaging only `/.vite/**`.
         // DashPlayer has runtime deps (incl. native modules) that must ship with the app.
