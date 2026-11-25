@@ -117,16 +117,17 @@ const PlaybackControlBar = ({
             onMouseLeave={onMouseLeave}
             style={{ bottom: maskAdjust.liftPx + CONTROL_BAR_GAP_PX }}
             className={cn(
-                // 不再留底部内边距：控制条直接压到播放区底边（画面下沿的黑边），
-                // 与画面里烧进的字幕彻底分离，也不再悬在画面中间
-                'w-full flex flex-col-reverse h-36 text-white/90 px-4 pb-0 pt-2 pointer-events-auto',
+                // 不留左右内边距：控制条整条贴到播放区左右两边（水平铺满），
+                // 内容的内边距改由面板内部统一给，避免按钮贴边
+                'w-full flex flex-col-reverse h-36 text-white/90 px-0 pb-0 pt-2 pointer-events-auto',
                 'transition-[bottom] duration-200 ease-out',
                 className
             )}
         >
             <div
                 className={cn(
-                    'relative z-20 w-full px-2 lg:px-4 py-3 rounded-2xl border border-white/10 bg-black/60 backdrop-blur-md shadow-2xl transition-opacity duration-200 ease-out pointer-events-auto',
+                    // 整条铺满左右两边：去掉圆角与左右内边距，内容间距交给内层 px-4
+                    'relative z-20 w-full px-0 py-3 rounded-none border-x-0 border-t border-white/10 bg-black/60 backdrop-blur-md shadow-2xl transition-opacity duration-200 ease-out pointer-events-auto',
                     maskAdjust.ghost
                         ? 'opacity-40 pointer-events-none'
                         : barVisible
@@ -138,7 +139,7 @@ const PlaybackControlBar = ({
                     handleMouseMoveIn();
                 }}
             >
-                <div className="flex flex-col items-center justify-between w-full gap-2.5">
+                <div className="flex flex-col items-center justify-between w-full gap-2.5 px-4">
                     <Slider
                         max={Math.max(duration, 0.1)}
                         min={0}
