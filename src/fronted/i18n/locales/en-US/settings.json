@@ -369,7 +369,7 @@
             "sherpaOnnxModelFile": "Parakeet TDT 0.6B v3 (ONNX int8, ~640 MB)"
         },
         "localTts": {
-            "modelFile": "Piper en_US Amy Low (~18 MB)"
+            "modelFile": "Piper en_US Lessac Medium (~64 MB, 22 kHz)"
         },
         "localModel": {
             "deleteModel": "Delete model",

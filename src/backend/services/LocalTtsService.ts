@@ -65,7 +65,7 @@ export class LocalTtsServiceImpl implements LocalTtsService {
         await this.fileSystemGateway.ensureDirectory(outputDir);
         const outputPath = path.join(outputDir, `${Date.now()}-${Math.random().toString(36).slice(2)}.wav`);
         return this.cli.run({
-            modelPath: path.join(modelDir, 'en_US-amy-low.onnx'),
+            modelPath: path.join(modelDir, 'en_US-lessac-medium.onnx'),
             tokensPath: path.join(modelDir, 'tokens.txt'),
             dataDir: path.join(modelDir, 'espeak-ng-data'),
             outputPath,
