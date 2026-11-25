@@ -158,14 +158,14 @@ const VideoItem2 = ({ pv, variant = 'normal', ctxMenus, onClick }: {
                                 <div className="flex min-w-0 flex-1 flex-col gap-1">
                                     <div
                                         className={cn(
-                                            'line-clamp-2 text-[13px] font-semibold text-foreground/90 transition-colors group-hover/file-item:text-foreground',
+                                            'line-clamp-2 text-[14px] font-semibold text-foreground/90 transition-colors group-hover/file-item:text-foreground',
                                             variant === 'highlight' && 'text-primary font-bold'
                                         )}
                                         title={pv.displayFileName ?? pv.fileName}
                                     >
                                         {pv.displayFileName ?? pv.fileName}
                                     </div>
-                                    <div className="flex flex-wrap items-center gap-1.5 text-[12px] text-muted-foreground">
+                                    <div className="flex flex-wrap items-center gap-1.5 text-[12.5px] text-muted-foreground">
                                         {pv?.updatedAt && (
                                             <span>{TimeUtil.dateToRelativeTime(pv.updatedAt)}</span>
                                         )}

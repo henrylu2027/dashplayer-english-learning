@@ -32,18 +32,36 @@ const PlaybackLayout = () => {
     // 有会话时保持挂载，切回播放画面只做隐藏，避免回来时对话与滚动状态丢失
     const learningMounted = learningVisible || hasLearningContext;
     const [sizeOa, setSizeOa] = useLocalStorage<number>('split-size-oa', 70);
-    // 右侧字幕栏：25% 在 1440 窗口下只有约 200px，长句被折成三行，读起来很挤。
-    // 默认抬到 30%，并把历史保存的旧值兜底抬起；用户仍可拖宽。
-    const [sizeObStored, setSizeOb] = useLocalStorage<number>('split-size-ob', 30);
-    const sizeOb = Math.max(sizeObStored, 30);
+    // 右侧字幕栏默认 30%：25% 在 1440 窗口下只有约 200px，长句会被折成三行。
+    const [sizeOb, setSizeOb] = useLocalStorage<number>('split-size-ob', 30);
     const [sizeIa, setSizeIa] = useLocalStorage<number>('split-size-ia', 70);
-    // 主字幕区占比：播放区不再整体缩放后，字幕区拿到的是真实像素高度。
-    // 20% 在 900 高的窗口下只有约 110px，装不下「两行英文 + 一行译文」（约 146px），
-    // 会被卡片下边缘裁掉；30% 能完整显示两行字幕，视频仍有足够高度。
-    const [sizeIbStored, setSizeIb] = useLocalStorage<number>('split-size-ib', 30);
-    // 旧版本留下的 20% 会让两行字幕被卡片下边缘裁掉；这里兜底抬到 30%，
-    // 保存过的历史值不必手动清理。用户仍可拖到 30% 以上。
-    const sizeIb = Math.max(sizeIbStored, 30);
+    // 主字幕区默认 30%：播放区不再整体缩放后，字幕区拿到的是真实像素高度，
+    // 20% 在 900 高的窗口下装不下「两行英文 + 一行译文」，会被卡片下边缘裁掉。
+    const [sizeIb, setSizeIb] = useLocalStorage<number>('split-size-ib', 30);
+
+    /**
+     * 旧版本保存的 25% / 20% 会让字幕栏过窄、整句字幕被裁。
+     * 只在首次运行新版本时把它们抬到 30%，之后不再夹紧——
+     * 之前用 Math.max 在每次渲染时兜底，用户一旦往小拖就会被弹回去，
+     * 表现为「分栏拖不动」。这里改成一次性迁移，拖拽恢复自由。
+     */
+    useEffect(() => {
+        const migrationKey = 'split-sizes-migrated-v1';
+        try {
+            if (window.localStorage.getItem(migrationKey) === 'true') {
+                return;
+            }
+            if (sizeOb < 30) {
+                setSizeOb(30);
+            }
+            if (sizeIb < 30) {
+                setSizeIb(30);
+            }
+            window.localStorage.setItem(migrationKey, 'true');
+        } catch {
+            // localStorage 不可用时不影响布局，保持当前值即可
+        }
+    }, [sizeOb, sizeIb, setSizeOb, setSizeIb]);
     const navigate = useNavigate();
     const { handlePlayerReady, handleAutoPlayNext } = usePlayerBridge(navigate);
 

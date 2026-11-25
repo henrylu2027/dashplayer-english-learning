@@ -471,10 +471,10 @@ const PlayerWithControlsPage = () => {
             const rect = posRef.current.getBoundingClientRect();
             setPos({
                 x: rect.x,
-                y:
-                    rect.y -
-                    titleBarHeight +
-                    (window.innerHeight - titleBarHeight) * 0.05,
+                // 容器与网格同处一个坐标系：直接用网格单元的视口坐标即可。
+                // 不再额外下移 5%，也不再减 titleBarHeight——两者都会让播放卡片
+                // 与右侧「视频浏览」面板的底边错开 20~30px。
+                y: rect.y,
                 width: rect.width,
                 height: rect.height
             });
