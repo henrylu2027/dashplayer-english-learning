@@ -34,8 +34,13 @@ export type DialogueRole = (typeof DIALOGUE_ROLES)[number];
 export const dialogueTargetExpressionSchema = z.object({
     /** 英文表达。 */
     en: z.string().min(1),
-    /** 中文释义。 */
-    zh: z.string().min(1),
+    /**
+     * 中文释义。
+     *
+     * 允许为空：取自学习者练习记录的台词可能还没有译文，本地小模型也会原样留空。
+     * 宁可只显示英文，也不为了通过校验临时编一个意思。
+     */
+    zh: z.string(),
 });
 
 /** 目标表达类型。 */
@@ -184,6 +189,21 @@ export interface DialogueAvailability {
 }
 
 /**
+ * 学习者练过的一句台词。
+ *
+ * 来源是当前视频的跟读记录或复习卡：这些句子用户已经反复听过、读过，
+ * 拿来练口语比让模型凭空设计场景更贴近真实学习。
+ */
+export interface DialogueFocusLine {
+    /** 英文原句；进入对话时必须逐字复用。 */
+    en: string;
+    /** 中文译文；缺失时由模型补写释义。 */
+    zh?: string;
+    /** 字幕句序号，便于回溯原句。 */
+    sentenceIndex?: number;
+}
+
+/**
  * 生成场景并创建对话的请求。
  */
 export interface DialogueCreateRequest {
@@ -191,6 +211,13 @@ export interface DialogueCreateRequest {
     anchorText: string;
     /** 当前句及前后台词的快照。 */
     paragraphLines: string[];
+    /**
+     * 学习者练过的台词（跟读记录 / 复习卡）。
+     *
+     * 传了 2 句以上时，场景必须让这些原句自然出现，目标表达直接使用这些原句，
+     * 不再由模型自由生成；不足 2 句则忽略，退回按当前句生成。
+     */
+    focusLines?: DialogueFocusLine[];
     /** 视频句来源；必须绑定视频与字幕，才能保留回放语境。 */
     source: ShadowingAttemptSource;
     /** 难度。 */

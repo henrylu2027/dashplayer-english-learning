@@ -8,6 +8,7 @@ import type {
     DialogueAvailability,
     DialogueDetail,
     DialogueDifficulty,
+    DialogueFocusLine,
     DialogueModelBackend,
     DialogueReview,
     DialogueScene,
@@ -18,6 +19,8 @@ import { Button } from '@/fronted/components/ui/button';
 import useFile from '@/fronted/features/file-browser/fileStore';
 import { usePlayer } from '@/fronted/features/player/playerStore';
 import { buildVideoShadowingSource } from '@/fronted/features/shadowing/shadowingSource';
+import { shadowingApi } from '@/fronted/features/shadowing/shadowingApi';
+import { srsApi } from '@/fronted/features/srs/srsApi';
 import { getTtsUrl, playAudioUrl } from '@/fronted/infrastructure/audio/AudioPlayer';
 import { getRendererLogger } from '@/fronted/log/simple-logger';
 import { cn } from '@/fronted/lib/utils';
@@ -122,6 +125,75 @@ export default function DialoguePage() {
             .map((item) => item.text);
     }, [currentSentence, sentences]);
 
+    /**
+     * 收集当前视频里学习者练过的台词，作为场景取材。
+     *
+     * 来源：复习卡（进过复习队列）与跟读记录（练过但没加复习）。
+     * 这些句子用户已经反复听过、读过，拿来练口语比让模型凭空设计场景更有效。
+     * 不足 3 句时用当前句前后各两句补齐，保证场景有足够的句子可用。
+     */
+    const collectFocusLines = useCallback(async (): Promise<DialogueFocusLine[]> => {
+        if (!currentSentence) {
+            return [];
+        }
+        const videoKey = currentSentence.fileHash;
+        const learnedIndexes = new Set<number>();
+        try {
+            const overview = await srsApi.overview();
+            [...overview.dueCards, ...overview.upcomingCards].forEach((card) => {
+                if (card.videoKey === videoKey && card.sentenceIndex !== null) {
+                    learnedIndexes.add(card.sentenceIndex);
+                }
+            });
+        } catch (cardError) {
+            logger.warn('读取复习卡失败，场景取材退化为跟读记录', { error: cardError });
+        }
+        try {
+            // 接口上限 50 条，超过会被主进程拒绝
+            const attempts = await shadowingApi.listAttempts({ videoKey, limit: 50 });
+            attempts.forEach((attempt) => {
+                if (attempt.sentenceIndex !== null) {
+                    learnedIndexes.add(attempt.sentenceIndex);
+                }
+            });
+        } catch (attemptError) {
+            logger.warn('读取跟读记录失败', { error: attemptError });
+        }
+
+        const byIndex = new Map(sentences.map((sentence) => [sentence.index, sentence]));
+        const learned = [...learnedIndexes]
+            .sort((a, b) => a - b)
+            .flatMap((index) => {
+                const sentence = byIndex.get(index);
+                return sentence
+                    ? [{ en: sentence.text, zh: sentence.textZH, sentenceIndex: sentence.index }]
+                    : [];
+            });
+
+        if (learned.length >= 3) {
+            return learned.slice(0, 5);
+        }
+
+        // 不足 3 句：用当前句前后各两句补齐，练过的句子仍排在最前
+        const ordered = [...sentences].sort((a, b) => a.index - b.index);
+        const position = ordered.findIndex((item) => item.index === currentSentence.index);
+        const padded = [...learned];
+        const used = new Set(padded.map((line) => line.sentenceIndex));
+        if (position >= 0) {
+            for (const sentence of ordered.slice(Math.max(0, position - 2), position + 3)) {
+                if (padded.length >= 3) {
+                    break;
+                }
+                if (used.has(sentence.index)) {
+                    continue;
+                }
+                used.add(sentence.index);
+                padded.push({ en: sentence.text, zh: sentence.textZH, sentenceIndex: sentence.index });
+            }
+        }
+        return padded;
+    }, [currentSentence, sentences]);
+
     const speak = useCallback((text: string) => {
         if (!text.trim()) {
             return;
@@ -142,9 +214,12 @@ export default function DialoguePage() {
         setReview(null);
         setHistoryDetail(null);
         try {
+            // 取材：优先用这个视频里练过的句子，不足 3 句时自动补齐
+            const focusLines = await collectFocusLines();
             const result = await dialogueApi.create({
                 anchorText: currentSentence.text,
                 paragraphLines,
+                focusLines,
                 source: buildVideoShadowingSource(currentSentence, videoPath, subtitlePath),
                 difficulty,
                 backend,

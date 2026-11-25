@@ -1,5 +1,6 @@
 import type {
     DialogueDifficulty,
+    DialogueFocusLine,
     DialogueScene,
     DialogueStats,
     DialogueTurnVO,
@@ -39,16 +40,34 @@ export const buildScenePrompt = (params: {
     paragraphLines: string[];
     /** 难度。 */
     difficulty: DialogueDifficulty;
+    /** 学习者练过的台词；有值时场景必须复用这些原句。 */
+    focusLines?: DialogueFocusLine[];
 }): string => {
     const contextLines = params.paragraphLines.length > 0
         ? params.paragraphLines.map((line, index) => `${index + 1}. ${line}`).join('\n')
         : '（无）';
+    const focusLines = params.focusLines ?? [];
+    const hasFocus = focusLines.length >= 2;
+    const focusBlock = hasFocus
+        ? [
+            '',
+            '学习者反复练习过下面这些台词（来自他们的跟读与复习记录）：',
+            focusLines.map((line, index) => `${index + 1}. 「${line.en}」${line.zh ? `（${line.zh}）` : ''}`).join('\n'),
+            '',
+            '# 取材要求（优先级最高）',
+            '- 场景必须让上面这些台词原样出现在对话里：逐字一致，不改时态、不换同义词、不省略。',
+            '- targetExpressions 必须从这些台词里按顺序取 2~4 句：en 与原文逐字一致，zh 给出该句准确的中文意思。',
+            '- 即使上面某句没有附中文，也要在 zh 里补上它准确的中文意思，不允许留空。',
+            '- 情境要能自然地承接这些句子；不要为了凑句子硬拼互不相关的情节。',
+        ]
+        : [];
     return [
         '你在为英语学习工具设计一个角色扮演场景。学习者刚在视频里听到这句台词：',
         `「${params.anchorText}」`,
         '',
         '当前句及前后台词：',
         contextLines,
+        ...focusBlock,
         '',
         `语言难度：${DIFFICULTY_LABEL[params.difficulty]}（${DIFFICULTY_GUIDE[params.difficulty]}）`,
         '',
@@ -57,7 +76,9 @@ export const buildScenePrompt = (params: {
         '- 场景要能来回多轮：有明确的双方诉求或话题，不要一问一答就结束。',
         '- 双方角色自然、地位平等，不预设学习者年龄，不要设计儿童专属场景。',
         '- 不要给学习者或 AI 角色起具体人名，用「你」「对方」或通用身份（如“店员”“旅客”）描述。',
-        '- 目标表达 2~4 个（默认 3 个）：都是这个场景里真会用到的英文表达，难度符合上面的档位。',
+        hasFocus
+            ? '- 目标表达 2~4 个：按上面的「取材要求」从练习过的台词里选，不要另外新编表达。'
+            : '- 目标表达 2~4 个（默认 3 个）：都是这个场景里真会用到的英文表达，难度符合上面的档位。',
         '- 开场白由 AI 角色先说，1~2 句英文，能自然引出学习者的回应；中文只用于设定和解说，台词必须是英文。',
         '- title 必须是英文，不超过 6 个词；openingHintZh 是一句中文，说明开场白的意思或学习者可以怎么接。',
         '',
@@ -91,7 +112,7 @@ export const buildDialogueSystemPrompt = (params: {
     difficulty: DialogueDifficulty;
 }): string => {
     const targets = params.scene.targetExpressions
-        .map((item) => `- ${item.en}（${item.zh}）`)
+        .map((item) => (item.zh.trim() ? `- ${item.en}（${item.zh}）` : `- ${item.en}`))
         .join('\n');
     return [
         '# 角色扮演规则',
@@ -141,7 +162,7 @@ export const buildReviewPrompt = (params: {
     stats: DialogueStats;
 }): string => {
     const targets = params.scene.targetExpressions
-        .map((item) => `- ${item.en}（${item.zh}）`)
+        .map((item) => (item.zh.trim() ? `- ${item.en}（${item.zh}）` : `- ${item.en}`))
         .join('\n');
     return [
         '下面是学习者和 AI 的角色扮演记录，请做一次学习复盘。',

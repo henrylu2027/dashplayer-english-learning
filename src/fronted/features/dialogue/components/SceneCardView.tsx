@@ -47,7 +47,10 @@ export default function SceneCardView({
                             className="group flex items-center gap-1.5 rounded-full border border-border/60 px-2.5 py-1 text-xs text-foreground/80 transition-colors hover:border-border hover:text-foreground"
                         >
                             <span>{item.en}</span>
-                            <span className="text-muted-foreground">{item.zh}</span>
+                            {/* 取自练习记录的台词可能没有译文，空着就不占位，避免出现悬空的括号 */}
+                            {item.zh.trim() !== '' && (
+                                <span className="text-muted-foreground">{item.zh}</span>
+                            )}
                             <Volume2 className="h-3 w-3 opacity-0 transition-opacity group-hover:opacity-100" />
                         </button>
                     ))}

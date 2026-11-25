@@ -29,7 +29,9 @@ import {
     type DialogueReviewDraft,
     type DialogueScene,
     type DialogueSessionSummary,
+    type DialogueFocusLine,
     type DialogueStats,
+    type DialogueTargetExpression,
     type DialogueTranscribeRequest,
     type DialogueTranscribeResult,
     type DialogueTurnVO,
@@ -107,6 +109,12 @@ const MAX_TURN_CHARS = 4000;
 /** 周边上下文最多保留的行数。 */
 const MAX_CONTEXT_LINES = 6;
 
+/** 练过的台词最多取几句；再多场景就装不下了。 */
+const MAX_FOCUS_LINES = 6;
+
+/** 目标表达最多几个，与场景 schema 的上限一致。 */
+const MAX_TARGET_EXPRESSIONS = 4;
+
 /**
  * 把文本归一化为用于目标表达匹配的字符串。
  * @param text 原始文本。
@@ -116,6 +124,68 @@ const normalizePhrase = (text: string): string => tokenizeForScoring(text)
     .map(normalizeWord)
     .filter((word) => word.length > 0)
     .join(' ');
+
+/**
+ * 归一化学习者练过的台词：去空、按归一化文本去重、限制条数。
+ *
+ * @param lines 前端传来的练过的台词（可能为空或含空串）。
+ * @returns 干净的台词列表，最多 `MAX_FOCUS_LINES` 条。
+ */
+const normalizeFocusLines = (lines: DialogueFocusLine[] | undefined): DialogueFocusLine[] => {
+    const seen = new Set<string>();
+    const normalized: DialogueFocusLine[] = [];
+    for (const line of lines ?? []) {
+        const en = (line?.en ?? '').trim();
+        if (en.length === 0) {
+            continue;
+        }
+        const key = normalizePhrase(en);
+        if (key.length === 0 || seen.has(key)) {
+            continue;
+        }
+        seen.add(key);
+        const zh = (line?.zh ?? '').trim();
+        normalized.push({
+            en,
+            ...(zh ? { zh } : {}),
+            ...(line.sentenceIndex === undefined ? {} : { sentenceIndex: line.sentenceIndex }),
+        });
+        if (normalized.length >= MAX_FOCUS_LINES) {
+            break;
+        }
+    }
+    return normalized;
+};
+
+/**
+ * 把目标表达锁定为学习者练过的原句。
+ *
+ * 提示词只能"建议"模型复用原句，是否照做不可控；复盘的目标表达命中按文本匹配，
+ * 一旦模型改写了句子就永远命中不了。这里在代码层直接替换，保证场景卡与复盘
+ * 核对的是同一批句子。
+ *
+ * @param scene 模型生成的场景。
+ * @param focusLines 练过的台词（已归一化）。
+ * @returns 目标表达被替换后的场景；可用原句不足 2 句时原样返回。
+ */
+const applyFocusTargets = (scene: DialogueScene, focusLines: DialogueFocusLine[]): DialogueScene => {
+    if (focusLines.length < 2) {
+        return scene;
+    }
+    const zhByKey = new Map(scene.targetExpressions.map((item) => [normalizePhrase(item.en), item.zh]));
+    const targets: DialogueTargetExpression[] = focusLines
+        .slice(0, MAX_TARGET_EXPRESSIONS)
+        .map((line) => {
+            // 译文只用「同一句」的：字幕里已有的，或模型对这句给出的释义。
+            // 取不到就留空——宁可只显示英文，也不把别句的意思安上去。
+            const zh = line.zh?.trim() || zhByKey.get(normalizePhrase(line.en)) || '';
+            return { en: line.en, zh };
+        });
+    if (targets.length < 2) {
+        return scene;
+    }
+    return { ...scene, targetExpressions: targets };
+};
 
 /**
  * 场景对话服务：场景生成、消息转写、复盘与持久化。
@@ -197,18 +267,23 @@ export class DialogueServiceImpl implements DialogueService {
             .map((line) => line.trim())
             .filter((line) => line.length > 0)
             .slice(0, MAX_CONTEXT_LINES);
+        // 学习者练过的台词：至少两句才参与取材，否则退回按当前句生成
+        const focusLines = normalizeFocusLines(request.focusLines);
 
         if (request.backend === 'local') {
             this.localAiService.beginDialogueSession();
         }
         let chatSessionId: string | null = null;
         try {
-            const scene = await this.generateScene({
+            const generatedScene = await this.generateScene({
                 anchorText,
                 paragraphLines,
+                focusLines,
                 difficulty: request.difficulty,
                 backend: request.backend,
             });
+            // 练过的句子优先：目标表达在代码层锁定为原句，避免模型改写后复盘核对不上
+            const scene = applyFocusTargets(generatedScene, focusLines);
             const systemPrompt = buildDialogueSystemPrompt({ scene, difficulty: request.difficulty });
             chatSessionId = this.chatSessionService.create({
                 videoId: source.videoKey,
@@ -239,6 +314,8 @@ export class DialogueServiceImpl implements DialogueService {
                 backend: request.backend,
                 difficulty: request.difficulty,
                 targetCount: scene.targetExpressions.length,
+                focusCount: focusLines.length,
+                focusLocked: focusLines.length >= 2,
             });
             return { session: record.session, scene };
         } catch (error) {
@@ -370,6 +447,8 @@ export class DialogueServiceImpl implements DialogueService {
     private async generateScene(params: {
         anchorText: string;
         paragraphLines: string[];
+        /** 学习者练过的台词；有值时场景必须复用这些原句。 */
+        focusLines: DialogueFocusLine[];
         difficulty: DialogueCreateRequest['difficulty'];
         backend: DialogueModelBackend;
     }): Promise<DialogueScene> {
