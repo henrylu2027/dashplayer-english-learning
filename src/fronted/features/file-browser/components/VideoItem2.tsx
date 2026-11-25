@@ -104,7 +104,7 @@ const VideoItem2 = ({ pv, variant = 'normal', ctxMenus, onClick }: {
                                     onClick?.();
                                 }}
                             >
-                                <div className="relative aspect-video w-28 sm:w-32 flex-shrink-0 overflow-hidden rounded-lg border border-border/50 bg-muted/70 shadow-2xs">
+                                <div className="relative aspect-video w-20 sm:w-24 flex-shrink-0 overflow-hidden rounded-lg border border-border/50 bg-muted/70 shadow-2xs">
                                     {isAudio ? (
                                         <div className="absolute inset-0">
                                             <MusicCard fileName={pv.fileName} />
@@ -144,7 +144,7 @@ const VideoItem2 = ({ pv, variant = 'normal', ctxMenus, onClick }: {
                                         </div>
                                     )}
                                     {!isAudio && pv?.duration > 0 && (
-                                        <div className="pointer-events-none absolute bottom-1 right-1 rounded-md bg-black/75 backdrop-blur-md px-1.5 py-0.5 text-[10px] font-medium text-white/95 shadow-2xs">
+                                        <div className="pointer-events-none absolute bottom-1 right-1 rounded-md bg-black/75 backdrop-blur-md px-1.5 py-0.5 text-[11px] font-medium text-white/95 shadow-2xs">
                                             {TimeUtil.secondToTimeStrCompact(pv.duration)}
                                         </div>
                                     )}
@@ -158,14 +158,14 @@ const VideoItem2 = ({ pv, variant = 'normal', ctxMenus, onClick }: {
                                 <div className="flex min-w-0 flex-1 flex-col gap-1">
                                     <div
                                         className={cn(
-                                            'truncate text-xs font-semibold text-foreground/90 transition-colors group-hover/file-item:text-foreground',
+                                            'line-clamp-2 text-[13px] font-semibold text-foreground/90 transition-colors group-hover/file-item:text-foreground',
                                             variant === 'highlight' && 'text-primary font-bold'
                                         )}
                                         title={pv.displayFileName ?? pv.fileName}
                                     >
                                         {pv.displayFileName ?? pv.fileName}
                                     </div>
-                                    <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground">
+                                    <div className="flex flex-wrap items-center gap-1.5 text-[12px] text-muted-foreground">
                                         {pv?.updatedAt && (
                                             <span>{TimeUtil.dateToRelativeTime(pv.updatedAt)}</span>
                                         )}

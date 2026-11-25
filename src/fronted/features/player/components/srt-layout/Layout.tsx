@@ -31,10 +31,19 @@ const PlaybackLayout = () => {
     const learningVisible = useChatPanel((s) => s.learningVisible);
     // 有会话时保持挂载，切回播放画面只做隐藏，避免回来时对话与滚动状态丢失
     const learningMounted = learningVisible || hasLearningContext;
-    const [sizeOa, setSizeOa] = useLocalStorage<number>('split-size-oa', 75);
-    const [sizeOb, setSizeOb] = useLocalStorage<number>('split-size-ob', 25);
-    const [sizeIa, setSizeIa] = useLocalStorage<number>('split-size-ia', 80);
-    const [sizeIb, setSizeIb] = useLocalStorage<number>('split-size-ib', 20);
+    const [sizeOa, setSizeOa] = useLocalStorage<number>('split-size-oa', 70);
+    // 右侧字幕栏：25% 在 1440 窗口下只有约 200px，长句被折成三行，读起来很挤。
+    // 默认抬到 30%，并把历史保存的旧值兜底抬起；用户仍可拖宽。
+    const [sizeObStored, setSizeOb] = useLocalStorage<number>('split-size-ob', 30);
+    const sizeOb = Math.max(sizeObStored, 30);
+    const [sizeIa, setSizeIa] = useLocalStorage<number>('split-size-ia', 70);
+    // 主字幕区占比：播放区不再整体缩放后，字幕区拿到的是真实像素高度。
+    // 20% 在 900 高的窗口下只有约 110px，装不下「两行英文 + 一行译文」（约 146px），
+    // 会被卡片下边缘裁掉；30% 能完整显示两行字幕，视频仍有足够高度。
+    const [sizeIbStored, setSizeIb] = useLocalStorage<number>('split-size-ib', 30);
+    // 旧版本留下的 20% 会让两行字幕被卡片下边缘裁掉；这里兜底抬到 30%，
+    // 保存过的历史值不必手动清理。用户仍可拖到 30% 以上。
+    const sizeIb = Math.max(sizeIbStored, 30);
     const navigate = useNavigate();
     const { handlePlayerReady, handleAutoPlayNext } = usePlayerBridge(navigate);
 
@@ -113,7 +122,8 @@ const PlaybackLayout = () => {
     const containerClass = cn(
         'relative w-full h-full flex flex-col border-0 border-white/90 drop-shadow-lg overflow-hidden bg-stone-200 dark:bg-black',
         hasSubTitle && 'border-r-0',
-        showSideBar && 'overflow-hidden border-[30px] border-background/80 rounded-[45px]'
+        // 边框从 30px 收到 16px：侧栏模式不再整体缩放后，这圈边框吃掉的都是真实画面尺寸
+        showSideBar && 'overflow-hidden border-[16px] border-background/80 rounded-[28px]'
     );
 
     if (!hasSource) {

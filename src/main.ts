@@ -1,7 +1,7 @@
 import 'dotenv/config';
 import 'reflect-metadata';
 import type LocalAiService from '@/backend/services/LocalAiService';
-import { app, BrowserWindow, type Session } from 'electron';
+import { app, BrowserWindow, screen, type Session } from 'electron';
 import squirrelStartup from 'electron-squirrel-startup';
 import { spawn } from 'node:child_process';
 import fs from 'fs';
@@ -170,9 +170,15 @@ const createWindow = () => {
     logger.info('main window created');
     // Create the browser window.
     const isMac = process.platform === 'darwin';
+    // 默认窗口按主屏可用区域取 85%，上限 1440×900、下限 1200×800，并压在工作区内。
+    // 三栏布局（导航 / 播放 / 视频浏览）在 1200 宽时右侧列表和字幕栏过窄，
+    // 标题会被截成一两个字，学习功能的可读性明显下降。
+    const workArea = screen.getPrimaryDisplay().workAreaSize;
+    const initialWidth = Math.min(1440, Math.max(1200, Math.round(workArea.width * 0.85)), workArea.width - 40);
+    const initialHeight = Math.min(900, Math.max(800, Math.round(workArea.height * 0.85)), workArea.height - 40);
     const mainWindow = new BrowserWindow({
-        width: 1200,
-        height: 800,
+        width: initialWidth,
+        height: initialHeight,
         webPreferences: {
             preload: path.join(__dirname, 'preload.cjs'),
             webSecurity: false,

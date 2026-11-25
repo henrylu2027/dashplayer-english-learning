@@ -154,25 +154,25 @@ export default function ControlBox() {
 
   return (
     <Card className={cn('w-full h-full flex flex-col overflow-hidden rounded-2xl border border-border/70 bg-card shadow-2xs')}>
-      <CardHeader className="shrink-0 px-4 pt-4 pb-3.5">
+      <CardHeader className="shrink-0 px-4 pt-3 pb-2">
         <CardTitle className="text-base font-semibold tracking-tight text-foreground">{t('controlBox.title')}</CardTitle>
       </CardHeader>
       
       {/* 滚动区域：仅开关网格在高度不够时纵向滚动 */}
       <CardContent
         className={cn(
-          'w-full flex-1 min-h-0 overflow-y-auto px-4 pt-0 pb-3',
+          'w-full flex-1 min-h-0 overflow-y-auto px-4 pt-0 pb-2',
           'scrollbar-thin scrollbar-thumb-muted-foreground/20 scrollbar-thumb-rounded scrollbar-track-transparent'
         )}
       >
         <div
-          className="grid min-h-0 content-start auto-rows-min gap-2"
-          style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))' }}
+          className="grid min-h-0 content-start auto-rows-min gap-1.5"
+          style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))' }}
         >
           {/* 字幕轨道：并入网格中，在有空间时占 2 列，跟随系统主色；窄宽时整组换行而不压缩药丸 */}
           <div
             data-testid="controlbar-track-group"
-            className="col-span-full sm:col-span-2 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-border/60 bg-muted/20 px-3 py-1.5 min-h-[38px]"
+            className="col-span-full sm:col-span-2 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-border/60 bg-muted/20 px-2.5 py-1 min-h-[34px]"
           >
             <span className="text-xs font-medium text-muted-foreground select-none shrink-0 whitespace-nowrap">
               {t('controlBox.subtitleTracks')}
@@ -205,7 +205,7 @@ export default function ControlBox() {
           {/* 侧栏：译文与「随英文字幕隐藏」管的是同一块右侧字幕栏，收成一组，不再一处药丸一处开关。
               这里不再有「侧栏当前被隐藏」的说明行：它会随开关出现/消失而改变分组高度，
               整个面板网格跟着下移（主人明确不要这种跳动）；说明改由药丸 tooltip 与侧栏 chip 承担 */}
-          <div className="col-span-full sm:col-span-2 flex flex-col justify-center gap-0.5 rounded-xl border border-border/60 bg-muted/20 px-3 py-1.5 min-h-[38px]">
+          <div className="col-span-full sm:col-span-2 flex flex-col justify-center gap-0.5 rounded-xl border border-border/60 bg-muted/20 px-2.5 py-1 min-h-[34px]">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <span className="text-xs font-medium text-muted-foreground select-none shrink-0 whitespace-nowrap">
                 {t('controlBox.sideGroupLabel')}
@@ -234,7 +234,7 @@ export default function ControlBox() {
             checked={singleRepeat}
             onCheckedChange={() => playerActions.setSingleRepeat(!singleRepeat)}
             tooltipMd={t('controlBox.shortcutHint', { shortcut: getShortcut('shortcut.repeatSentence') })}
-            className="h-9 px-3 py-1 rounded-xl"
+            className="h-8 px-2.5 py-1 rounded-xl"
             labelClassName="text-xs font-medium"
           />
           <SettingToggle
@@ -243,7 +243,7 @@ export default function ControlBox() {
             checked={autoPause}
             onCheckedChange={() => playerActions.setAutoPause(!autoPause)}
             tooltipMd={t('controlBox.autoPauseHint', { shortcut: getShortcut('shortcut.autoPause') })}
-            className="h-9 px-3 py-1 rounded-xl"
+            className="h-8 px-2.5 py-1 rounded-xl"
             labelClassName="text-xs font-medium"
           />
           <SettingToggle
@@ -256,7 +256,7 @@ export default function ControlBox() {
               await setSetting('player.autoPlayNext', next ? 'true' : 'false');
             }}
             tooltipMd={t('controlBox.autoPlayNextHint')}
-            className="h-9 px-3 py-1 rounded-xl"
+            className="h-8 px-2.5 py-1 rounded-xl"
             labelClassName="text-xs font-medium"
           />
           <SettingToggle
@@ -267,7 +267,7 @@ export default function ControlBox() {
               setSetting('appearance.theme', setting('appearance.theme') === 'dark' ? 'light' : 'dark');
             }}
             tooltipMd={t('controlBox.shortcutHint', { shortcut: getShortcut('shortcut.nextTheme') })}
-            className="h-9 px-3 py-1 rounded-xl"
+            className="h-8 px-2.5 py-1 rounded-xl"
             labelClassName="text-xs font-medium"
           />
           <SettingToggle
@@ -283,7 +283,7 @@ export default function ControlBox() {
               await swrMutate(SWR_KEY.WINDOW_SIZE);
             }}
             tooltipMd={t('controlBox.fullScreenHint')}
-            className="h-9 px-3 py-1 rounded-xl"
+            className="h-8 px-2.5 py-1 rounded-xl"
             labelClassName="text-xs font-medium"
           />
           <SettingToggle
@@ -301,7 +301,7 @@ export default function ControlBox() {
                 }
             }}
             tooltipMd={t('controlBox.podcastModeHint')}
-            className="h-9 px-3 py-1 rounded-xl"
+            className="h-8 px-2.5 py-1 rounded-xl"
             labelClassName="text-xs font-medium"
           />
           {/* 挡字幕排在最后：它是画面上的一次性遮挡，与上面这些「放什么内容」的开关不同类 */}
@@ -310,18 +310,18 @@ export default function ControlBox() {
             label={t('hardsubMask.label')}
             checked={hardsubMaskOn}
             onCheckedChange={() => toggleHardsubMask()}
-            className="h-9 px-3 py-1 rounded-xl"
+            className="h-8 px-2.5 py-1 rounded-xl"
             labelClassName="text-xs font-medium"
           />
         </div>
 
         {/* 动作工具栏：自然跟随在控制项下方 */}
-        <div className="flex flex-wrap items-center gap-2 pt-2.5 pb-1">
-          <ClearAdjustButton className="h-8 rounded-lg border border-border/70 bg-muted/30 hover:bg-muted/70 px-3 text-xs font-normal text-muted-foreground hover:text-foreground transition-colors shadow-none" />
-          <RepairPlaybackButton className="h-8 rounded-lg border border-border/70 bg-muted/30 hover:bg-muted/70 px-3 text-xs font-normal text-muted-foreground hover:text-foreground transition-colors shadow-none" />
-          <TranscriptButton className="h-8 rounded-lg border border-border/70 bg-muted/30 hover:bg-muted/70 px-3 text-xs font-normal text-muted-foreground hover:text-foreground transition-colors shadow-none" />
-          <AutoClipButton className="h-8 rounded-lg border border-border/70 bg-muted/30 hover:bg-muted/70 px-3 text-xs font-normal text-muted-foreground hover:text-foreground transition-colors shadow-none" />
-          <DubbingExportButton className="h-8 rounded-lg border border-border/70 bg-muted/30 hover:bg-muted/70 px-3 text-xs font-normal text-muted-foreground hover:text-foreground transition-colors shadow-none" />
+        <div className="flex flex-wrap items-center gap-1.5 pt-2 pb-0.5">
+          <ClearAdjustButton className="h-7 rounded-lg border border-border/70 bg-muted/30 hover:bg-muted/70 px-2.5 text-xs font-normal text-muted-foreground hover:text-foreground transition-colors shadow-none" />
+          <RepairPlaybackButton className="h-7 rounded-lg border border-border/70 bg-muted/30 hover:bg-muted/70 px-2.5 text-xs font-normal text-muted-foreground hover:text-foreground transition-colors shadow-none" />
+          <TranscriptButton className="h-7 rounded-lg border border-border/70 bg-muted/30 hover:bg-muted/70 px-2.5 text-xs font-normal text-muted-foreground hover:text-foreground transition-colors shadow-none" />
+          <AutoClipButton className="h-7 rounded-lg border border-border/70 bg-muted/30 hover:bg-muted/70 px-2.5 text-xs font-normal text-muted-foreground hover:text-foreground transition-colors shadow-none" />
+          <DubbingExportButton className="h-7 rounded-lg border border-border/70 bg-muted/30 hover:bg-muted/70 px-2.5 text-xs font-normal text-muted-foreground hover:text-foreground transition-colors shadow-none" />
         </div>
       </CardContent>
     </Card>

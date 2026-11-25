@@ -191,7 +191,7 @@ export default function MainSubtitle() {
         }
         return (
             <div
-                className="relative flex flex-col w-full h-full items-center px-12 pt-3 pb-2 text-center text-textColor select-none overflow-hidden"
+                className="relative flex flex-col w-full h-full items-center px-10 pt-2 pb-1.5 text-center text-textColor select-none overflow-hidden"
             >
                 {/* 顶部弹性占位：比底部占位少，让文字动态停留在“中上”黄金位置（约 40% 高度） */}
                 <div className="w-full flex-[2] min-h-0 pointer-events-none" />

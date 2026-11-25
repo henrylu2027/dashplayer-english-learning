@@ -454,7 +454,15 @@ const PlayerWithControlsPage = () => {
         });
     }, [setSearchParams]);
     const posRef = useRef<HTMLDivElement>(null);
-    const [pos, setPos] = useState({x: 0, y: 0, scale: 1});
+    /**
+     * 侧栏模式下播放区的落位：按中间栏的真实宽高排版，再平移到该栏。
+     *
+     * 早期做法是先把播放区按整窗宽度排版、再用 scale 压进中间栏，界面里所有字号
+     * 会一起乘上缩放比（18px 字幕实际只有约 10.5px，控制栏 12px 只剩 7px）。
+     * 这里改成不缩放、直接给容器列宽列高，视频最终尺寸不变，但字幕、控制栏等
+     * 界面元素恢复设计字号。
+     */
+    const [pos, setPos] = useState({x: 0, y: 0, width: 0, height: 0});
     useLayoutEffect(() => {
         const updatePos = () => {
             if (posRef.current === null) {
@@ -467,7 +475,8 @@ const PlayerWithControlsPage = () => {
                     rect.y -
                     titleBarHeight +
                     (window.innerHeight - titleBarHeight) * 0.05,
-                scale: rect.width / window.innerWidth
+                width: rect.width,
+                height: rect.height
             });
         };
         updatePos();
@@ -496,7 +505,9 @@ const PlayerWithControlsPage = () => {
                 className="absolute inset-0 grid grid-cols-3 grid-rows-2 overflow-hidden"
                 style={{
                     gridTemplateColumns: gridTemplate(),
-                    gridTemplateRows: '30% 70%' // 这里定义每行的大小
+                    // 顶行按控制面板的实际高度自适应：固定 30% 在默认窗口下装不下全部开关，
+                    // 会挤出纵向滚动条。自适应后面板永远完整显示，播放区吃掉剩余高度。
+                    gridTemplateRows: 'auto minmax(0, 1fr)'
                 }}
             >
                 {showSideBar && (
@@ -530,7 +541,7 @@ const PlayerWithControlsPage = () => {
                     </>
                 )}
                 <div
-                    className="p-4"
+                    className="p-2.5 pl-1.5 pr-1"
                     style={{
                         gridArea: '2 / 2 / 2 / 3'
                     }}
@@ -540,15 +551,22 @@ const PlayerWithControlsPage = () => {
                 <div
                     className={cn(
                         'flex flex-col',
-                        showSideBar && 'p-4 pt-2 pr-2',
+                        // 内边距交给外层网格单元统一控制（与控制面板同一边距），
+                        // 这里不再叠加，播放卡片左右边缘才能和上方「播放控制」对齐
+                        showSideBar && 'p-0',
                         !((w('md') && h('md')) || !showSideBar) && 'hidden'
                     )}
                     style={{
                         gridArea: '1 / 1 / -1 / -1',
-                        transform: showSideBar
-                            ? `translate(${pos.x}px, ${pos.y}px) scale(${pos.scale})`
-                            : 'translate(0px, 0px) scale(1)',
-                        transformOrigin: 'top left'
+                        // 侧栏模式：按中间栏的宽高排版后平移过去，不做整体缩放
+                        ...(showSideBar
+                            ? {
+                                width: pos.width,
+                                height: pos.height,
+                                transform: `translate(${pos.x}px, ${pos.y}px)`,
+                                transformOrigin: 'top left'
+                            }
+                            : {})
                     }}
                 >
                     <PlaybackLayout/>

@@ -47,7 +47,10 @@ export const SettingKeyObj = {
     'services.openai.enableSentenceLearning': 'true',
     'services.openai.subtitleTranslationMode': 'zh',
     'appearance.theme': 'light',
-    'appearance.fontSize': 'fontSizeLarge',
+    // 默认「小」：侧栏字幕 14.5/12.5px、主字幕 20px。
+    // 1440 宽窗口下侧栏只有约 200px，字号再大会让长句挤成三行；
+    // 用户可在「设置中心 → 外观」自行调大。
+    'appearance.fontSize': 'fontSizeSmall',
     'i18n.language': 'system',
     'player.autoPlayNext': 'false',
     'storage.path': '',
