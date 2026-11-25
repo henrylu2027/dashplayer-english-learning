@@ -15,7 +15,9 @@ export const playAudioUrl = async (audioUrl: Nullable<string>) => {
     player?.pause();
     getRendererLogger('AudioPlayer').debug('play audio url', { audioUrl });
     player = new Audio(audioUrl);
-    player.volume = 0.5;
+    // 单词/句子朗读按满音量播放：TTS 音频本身峰值只有 -6 dBFS 左右，
+    // 之前再乘 0.5（-6 dB）听起来明显偏小，与视频原声也不成比例。
+    player.volume = 1;
     await player.play();
 };
 
