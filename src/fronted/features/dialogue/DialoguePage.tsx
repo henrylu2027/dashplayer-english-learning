@@ -34,6 +34,7 @@ import HistoryList from './components/HistoryList';
 import ReviewPanel from './components/ReviewPanel';
 import SceneCardView from './components/SceneCardView';
 import SceneSetupCard from './components/SceneSetupCard';
+import SpeechScorePanel from './components/SpeechScorePanel';
 
 const logger = getRendererLogger('DialoguePage');
 
@@ -432,24 +433,36 @@ export default function DialoguePage() {
                         void handleFinished(session, result);
                     }}
                     onSpeak={speak}
+                    onBack={() => setActive(null)}
                 />
             );
         }
         if (!currentSentence) {
             return (
-                <div className="flex flex-col items-center justify-center gap-3 rounded-2xl border border-border/60 bg-card px-6 py-14 text-center shadow-xs">
-                    <MessagesSquare className="h-8 w-8 text-muted-foreground/40" />
-                    <h3 className="text-base font-medium text-foreground/80">{t('dialogue.noSentenceTitle')}</h3>
-                    <p className="max-w-sm text-xs leading-5 text-muted-foreground">{t('dialogue.noSentenceGuide')}</p>
-                    <Button
-                        type="button"
-                        size="sm"
-                        className="mt-1 h-8 rounded-lg px-3 text-xs"
-                        onClick={() => navigate(videoId ? `/player/${videoId}?sideBarAnimation=false` : '/home')}
-                    >
-                        <ArrowLeft className="mr-1 h-3.5 w-3.5" />
-                        {t('dialogue.goPlayer')}
-                    </Button>
+                <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_380px]">
+                    <div className="flex flex-col items-center justify-center gap-3 rounded-2xl border border-border/60 bg-card px-6 py-14 text-center shadow-xs">
+                        <MessagesSquare className="h-8 w-8 text-muted-foreground/40" />
+                        <h3 className="text-base font-medium text-foreground/80">{t('dialogue.noSentenceTitle')}</h3>
+                        <p className="max-w-sm text-xs leading-5 text-muted-foreground">{t('dialogue.noSentenceGuide')}</p>
+                        <Button
+                            type="button"
+                            size="sm"
+                            className="mt-1 h-8 rounded-lg px-3 text-xs"
+                            onClick={() => navigate(videoId ? `/player/${videoId}?sideBarAnimation=false` : '/home')}
+                        >
+                            <ArrowLeft className="mr-1 h-3.5 w-3.5" />
+                            {t('dialogue.goPlayer')}
+                        </Button>
+                    </div>
+                    <SpeechScorePanel
+                        result={null}
+                        pending={false}
+                        disabled
+                        savingWords={false}
+                        onAddWords={() => undefined}
+                        onRetry={() => undefined}
+                        onContinue={() => undefined}
+                    />
                 </div>
             );
         }

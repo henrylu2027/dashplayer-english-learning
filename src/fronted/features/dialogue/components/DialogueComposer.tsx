@@ -41,7 +41,12 @@ export default function DialogueComposer({
 }: {
     disabled: boolean;
     busy: boolean;
-    onSend: (text: string, meta?: { lowConfidenceWords: string[] }) => void;
+    onSend: (text: string, meta?: {
+        lowConfidenceWords: string[];
+        /** 来自录音时带上原始音频，供发音评测使用；打字输入没有。 */
+        audio?: Uint8Array;
+        mimeType?: string;
+    }) => void;
     onStop: () => void;
 }) {
     const { t } = useTranslation('pages');
@@ -50,6 +55,8 @@ export default function DialogueComposer({
     const [error, setError] = useState<string | null>(null);
     /** 最近一次识别结果；学习者没改动时才把低置信度词带进纠错。 */
     const [recognition, setRecognition] = useState<{ text: string; lowConfidenceWords: string[] } | null>(null);
+    /** 最近一次录音的原始字节，发送时交给发音评测。 */
+    const [lastAudio, setLastAudio] = useState<{ bytes: Uint8Array; mimeType: string } | null>(null);
 
     const handleAudio = async (blob: Blob): Promise<void> => {
         if (blob.size === 0) {
@@ -60,15 +67,15 @@ export default function DialogueComposer({
         setError(null);
         try {
             const buffer = await blob.arrayBuffer();
-            const result = await dialogueApi.transcribe({
-                audio: new Uint8Array(buffer),
-                mimeType: blob.type || 'audio/webm',
-            });
+            const bytes = new Uint8Array(buffer);
+            const mimeType = blob.type || 'audio/webm';
+            const result = await dialogueApi.transcribe({ audio: bytes, mimeType });
             const recognized = result.text.trim();
             if (!recognized) {
                 setError(t('dialogue.emptyRecognition'));
                 return;
             }
+            setLastAudio({ bytes, mimeType });
             setInput((previous) => (previous.trim().length > 0 ? `${previous.trim()} ${recognized}` : recognized));
             setRecognition({ text: recognized, lowConfidenceWords: result.lowConfidenceWords });
         } catch (transcribeError) {
@@ -89,13 +96,19 @@ export default function DialogueComposer({
             return;
         }
         // 只有文本与识别结果完全一致时才认为"这是朗读输入"；
-        // 改过字就不能再把识别置信度当成发音线索
-        const meta = recognition && recognition.text === text && recognition.lowConfidenceWords.length > 0
-            ? { lowConfidenceWords: recognition.lowConfidenceWords }
+        // 改过字就不能再把识别置信度当成发音线索，也不能用这段音频评发音
+        const isRecognized = recognition !== null && recognition.text === text;
+        const meta = isRecognized
+            ? {
+                lowConfidenceWords: recognition.lowConfidenceWords,
+                audio: lastAudio?.bytes,
+                mimeType: lastAudio?.mimeType,
+            }
             : undefined;
         setInput('');
         setError(null);
         setRecognition(null);
+        setLastAudio(null);
         onSend(text, meta);
     };
 
@@ -179,7 +192,10 @@ export default function DialogueComposer({
             <div className="flex min-h-4 items-center gap-2 text-xs text-muted-foreground">
                 {isRecording && <span>{t('dialogue.recording', { time: formatElapsed(audio.elapsedSec) })}</span>}
                 {processing && <span>{t('dialogue.transcribing')}</span>}
-                {!isRecording && !processing && <span>{t('dialogue.recognitionHint')}</span>}
+                {!isRecording && !processing && recognition && (
+                    <span className="min-w-0 truncate">{t('dialogue.recognizedText', { text: recognition.text })}</span>
+                )}
+                {!isRecording && !processing && !recognition && <span>{t('dialogue.recognitionHint')}</span>}
             </div>
 
             {(error || audio.error) && (

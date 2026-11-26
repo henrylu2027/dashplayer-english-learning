@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import toast from 'react-hot-toast';
-import { CheckCheck, Loader2, Volume2 } from 'lucide-react';
+import { ArrowLeft, CheckCheck, Loader2, Play, RotateCcw, Volume2 } from 'lucide-react';
 
 import type {
     DialogueCorrection,
@@ -12,20 +12,27 @@ import type {
     DialogueSessionSummary,
     DialogueSpeaker,
 } from '@/common/contracts/dialogue';
+import type { RetellResult } from '@/common/contracts/practice';
+import { DIALOGUE_DIFFICULTIES } from '@/common/contracts/dialogue';
 import { Button } from '@/fronted/components/ui/button';
+import { practiceApi } from '@/fronted/features/practice/practiceApi';
+import { videoLearningApi } from '@/fronted/features/video-learning/videoLearningApi';
 import { getTtsUrl, playAudioUrlAndWait } from '@/fronted/infrastructure/audio/AudioPlayer';
 import { getRendererLogger } from '@/fronted/log/simple-logger';
 import { cn } from '@/fronted/lib/utils';
 import { dialogueApi } from '../dialogueApi';
-import ClipTranscriptRail from './ClipTranscriptRail';
 import CorrectionCard from './CorrectionCard';
 import DialogueComposer from './DialogueComposer';
 import SceneCardView from './SceneCardView';
+import SpeechScorePanel from './SpeechScorePanel';
 
 const logger = getRendererLogger('DialogueSessionView');
 
 /** 轮到 AI 时的起手停顿；真正的节奏由"上一句读完"决定。 */
 const AI_LINE_DELAY_MS = 400;
+
+/** 难度下拉的文案 key 前缀；具体文案在 pages.json 的 dialogue.difficulty 下。 */
+const DIFFICULTY_LABEL = 'dialogue.difficulty';
 
 /**
  * 对话中的一条消息。
@@ -69,14 +76,15 @@ const buildCue = (line: { en: string; zh?: string }, difficulty: DialogueDifficu
 /**
  * 进行中的场景对话：照着视频里这段真实台词，一句一句演下去。
  *
- * 说明：AI 不再自由发挥——轮到它时直接说剧本里的下一句原台词，
- * 这样对话顺序、内容和原片一致；模型只负责逐句纠错与最后的复盘。
+ * 左侧是对话气泡与录音区，右侧是学习者最近一次发言的发音评测面板；
+ * 记录本身仍以剧本为准，AI 只负责逐句纠错与最后的复盘。
  *
  * @param props.session 会话摘要。
  * @param props.scene 场景卡。
  * @param props.script 原片剧本；为空时无法继续。
  * @param props.onFinished 复盘完成回调。
  * @param props.onSpeak 朗读回调。
+ * @param props.onBack 返回历史列表。
  */
 export default function DialogueSessionView({
     session,
@@ -84,12 +92,14 @@ export default function DialogueSessionView({
     script,
     onFinished,
     onSpeak,
+    onBack,
 }: {
     session: DialogueSessionSummary;
     scene: DialogueScene;
     script: DialogueScript | null;
     onFinished: (session: DialogueSessionSummary, review: DialogueReview) => void;
     onSpeak: (text: string) => void;
+    onBack: () => void;
 }) {
     const { t } = useTranslation('pages');
     const lines = useMemo(() => script?.lines ?? [], [script]);
@@ -112,8 +122,12 @@ export default function DialogueSessionView({
     const [finishing, setFinishing] = useState(false);
     /** 学习者扮演哪一方；可以在对话中随时互换。 */
     const [learnerRole, setLearnerRole] = useState<DialogueSpeaker>(script?.learnerRole ?? 'a');
-    /** 右侧台词面板是否展开。 */
-    const [railOpen, setRailOpen] = useState(true);
+    /** 难度：只影响提示多少，默认跟随会话。 */
+    const [difficulty, setDifficulty] = useState<DialogueDifficulty>(session.difficulty);
+    /** 最近一次发言的评测结果，显示在右栏。 */
+    const [score, setScore] = useState<RetellResult | null>(null);
+    const [scoring, setScoring] = useState(false);
+    const [savingWords, setSavingWords] = useState(false);
     const bottomRef = useRef<HTMLDivElement | null>(null);
     /** 已经落库的行，避免 effect 重跑时重复写入。 */
     const persistedRef = useRef<Set<string>>(new Set());
@@ -145,13 +159,6 @@ export default function DialogueSessionView({
     const currentLine = cursor < lines.length ? lines[cursor] : null;
     const waitingForLearner = currentLine?.speaker === learnerRole;
     const finishedScript = lines.length > 0 && cursor >= lines.length;
-    /**
-     * 右侧轨道高亮哪一句。
-     *
-     * 谁说到哪一句就亮哪一句：AI 说完停在它那句，学习者说完停在他说那句；
-     * 开始前停在本场第一句。这样右边始终对应"刚才在演的那句"。
-     */
-    const [activeLineIndex, setActiveLineIndex] = useState(startPosition);
 
     // 轮到 AI：停顿一下，把下一句原台词说出来并落库
     useEffect(() => {
@@ -165,9 +172,6 @@ export default function DialogueSessionView({
         const timer = setTimeout(() => {
             const id = `ai-${cursor}`;
             setItems((previous) => [...previous, { id, role: 'assistant', text: line.en, hintZh: line.zh }]);
-            // 右侧停在这句：AI 正在说的就是它
-            setActiveLineIndex(cursor);
-            // 台词出现的同一时刻读出来；这句读完才轮到下一句
             setSpeechPending(true);
             const spoken = enqueueSpeech(line.en);
             void spoken.then(() => {
@@ -198,7 +202,41 @@ export default function DialogueSessionView({
         mountedRef.current = false;
     }, []);
 
-    const handleSend = async (text: string, meta?: { lowConfidenceWords: string[] }): Promise<void> => {
+    /**
+     * 对学习者这次发言做发音与语法评测。
+     *
+     * @param referenceText 本轮应说的台词原文。
+     * @param audio 录音字节；打字输入时不传，面板只提示不计发音。
+     * @param mimeType 录音 MIME。
+     */
+    const scoreTurn = async (referenceText: string, audio: Uint8Array, mimeType: string): Promise<void> => {
+        setScoring(true);
+        setScore(null);
+        try {
+            const result = await practiceApi.retell({
+                referenceText,
+                source: { kind: 'free' },
+                audio,
+                mimeType,
+            });
+            if (mountedRef.current) {
+                setScore(result);
+            }
+        } catch (error) {
+            logger.error('对话发音评测失败', { error });
+            toast.error(error instanceof Error ? error.message : t('dialogue.scoreFailed'));
+        } finally {
+            if (mountedRef.current) {
+                setScoring(false);
+            }
+        }
+    };
+
+    const handleSend = async (
+        text: string,
+        meta?: { lowConfidenceWords: string[]; audio?: Uint8Array; mimeType?: string },
+    ): Promise<void> => {
+        const referenceText = currentLine?.en ?? text;
         const userIndex = items.filter((item) => item.role === 'user').length;
         let turnId: number;
         try {
@@ -220,8 +258,6 @@ export default function DialogueSessionView({
             userIndex,
             correction: null,
         }]);
-        // 右侧停到学习者刚说的那句
-        setActiveLineIndex(cursor);
         // 学习者这句也读一遍：作为标准发音示范；这句读完才轮到 AI 接话
         setSpeechPending(true);
         void enqueueSpeech(text).then(() => {
@@ -230,6 +266,10 @@ export default function DialogueSessionView({
                 setCursor((value) => value + 1);
             }
         });
+        // 有录音才做发音评测；打字输入没有音频
+        if (meta?.audio && meta.audio.byteLength > 0) {
+            void scoreTurn(referenceText, meta.audio, meta.mimeType ?? 'audio/webm');
+        }
         setCorrectingUserIndex(userIndex);
         dialogueApi.correctTurn({
             sessionId: session.id,
@@ -262,6 +302,55 @@ export default function DialogueSessionView({
         }
     };
 
+    /** 把评测里读错/漏读的词与模型挑的生词送进词汇工坊。 */
+    const handleAddWords = async (): Promise<void> => {
+        if (!score) {
+            return;
+        }
+        const words = new Set<string>();
+        for (const word of score.words) {
+            if (word.status !== 'correct') {
+                const text = (word.expected ?? word.actual ?? '').trim();
+                if (text) {
+                    words.add(text);
+                }
+            }
+        }
+        for (const word of score.vocab) {
+            if (word.trim()) {
+                words.add(word.trim());
+            }
+        }
+        if (words.size === 0) {
+            toast.success(t('practice.noProblemWords'));
+            return;
+        }
+        setSavingWords(true);
+        let added = 0;
+        try {
+            for (const word of words) {
+                const response = await videoLearningApi.favoriteWord(word);
+                if (response.success) {
+                    added += 1;
+                }
+            }
+            toast.success(t('practice.wordsAdded', { count: added }));
+        } catch (error) {
+            logger.error('加入生词本失败', { error });
+            toast.error(t('practice.wordsAddFailed'));
+        } finally {
+            setSavingWords(false);
+        }
+    };
+
+    /** 重置对话：清空本地演出记录，从起点重演（不影响已落库的历史）。 */
+    const handleReset = (): void => {
+        setItems([]);
+        setCursor(startPosition);
+        setScore(null);
+        persistedRef.current.clear();
+    };
+
     if (!script) {
         return (
             <section className="rounded-2xl border border-dashed border-border/60 px-4 py-8 text-center text-sm text-muted-foreground">
@@ -270,145 +359,179 @@ export default function DialogueSessionView({
         );
     }
 
-    const conversationPane = (
-        <div className="flex min-w-0 flex-col gap-4">
-            <SceneCardView scene={scene} onSpeak={onSpeak} />
-
-            <section className="flex flex-col gap-4 rounded-2xl border border-border/60 bg-card p-5 shadow-xs">
-                <div className="flex items-center justify-between gap-2 border-b border-border/50 pb-3">
-                    <div className="text-xs text-muted-foreground">
-                        {t('dialogue.youPlay', { name: learnerRole === 'a' ? script.roleAName : script.roleBName })}
-                    </div>
-                    <div className="flex items-center gap-1">
-                        {!railOpen && (
-                            <Button
-                                type="button"
-                                size="sm"
-                                variant="ghost"
-                                className="h-7 rounded-lg px-2 text-xs"
-                                onClick={() => setRailOpen(true)}
-                            >
-                                {t('dialogue.railShow')}
-                            </Button>
-                        )}
-                        <Button
-                            type="button"
-                            size="sm"
-                            variant="ghost"
-                            className="h-7 rounded-lg px-2 text-xs"
-                            onClick={() => setLearnerRole((current) => (current === 'a' ? 'b' : 'a'))}
-                        >
-                            {t('dialogue.swapRoles')}
-                        </Button>
-                    </div>
+    return (
+        <div className="flex flex-col gap-4">
+            {/* 顶部工具栏 */}
+            <div className="flex flex-wrap items-center gap-2">
+                <div className="ml-auto flex flex-wrap items-center gap-2">
+                    <label className="flex items-center gap-1.5 rounded-full border border-border/60 bg-card px-3 py-1.5 text-xs text-muted-foreground">
+                        {t('dialogue.sceneLabel')}
+                        <span className="max-w-40 truncate text-foreground">{session.title || scene.title}</span>
+                    </label>
+                    <select
+                        value={learnerRole}
+                        onChange={(event) => setLearnerRole(event.target.value as DialogueSpeaker)}
+                        className="h-8 rounded-full border border-border/60 bg-card px-3 text-xs text-foreground outline-none"
+                    >
+                        <option value="a">{t('dialogue.aiRoleLabel')}：{script.roleBName}</option>
+                        <option value="b">{t('dialogue.aiRoleLabel')}：{script.roleAName}</option>
+                    </select>
+                    <select
+                        value={difficulty}
+                        onChange={(event) => setDifficulty(event.target.value as DialogueDifficulty)}
+                        className="h-8 rounded-full border border-border/60 bg-card px-3 text-xs text-foreground outline-none"
+                    >
+                        {DIALOGUE_DIFFICULTIES.map((item) => (
+                            <option key={item} value={item}>{t(`${DIFFICULTY_LABEL}.${item}`)}</option>
+                        ))}
+                    </select>
+                    <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        className="h-8 rounded-full px-3 text-xs"
+                        onClick={handleReset}
+                    >
+                        <RotateCcw className="mr-1 h-3.5 w-3.5" />
+                        {t('dialogue.resetChat')}
+                    </Button>
+                    <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        className="h-8 rounded-full px-3 text-xs"
+                        onClick={onBack}
+                    >
+                        <ArrowLeft className="mr-1 h-3.5 w-3.5" />
+                        {t('dialogue.backToList')}
+                    </Button>
                 </div>
-                <div className="flex flex-col gap-3">
-                    {items.map((item) => (
-                        <div
-                            key={item.id}
-                            className={cn('flex flex-col', item.role === 'user' ? 'items-end' : 'items-start')}
-                        >
-                            <div className="mb-1 text-[11px] text-muted-foreground">
-                                {item.role === 'user' ? t('dialogue.userLabel') : t('dialogue.aiLabel')}
-                            </div>
+            </div>
+
+            <div className="grid min-h-0 gap-4 lg:grid-cols-[minmax(0,1fr)_380px]">
+                {/* 左：对话练习 */}
+                <section className="flex min-w-0 flex-col gap-4 rounded-2xl border border-border/60 bg-card p-5 shadow-xs">
+                    <div className="flex items-center justify-between gap-2">
+                        <h2 className="text-sm font-medium text-foreground">{t('dialogue.chatTitle')}</h2>
+                        <span className="text-xs text-muted-foreground">
+                            {t('dialogue.youPlay', { name: learnerRole === 'a' ? script.roleAName : script.roleBName })}
+                        </span>
+                    </div>
+
+                    <SceneCardView scene={scene} onSpeak={onSpeak} />
+
+                    <div className="flex flex-col gap-3">
+                        {items.map((item) => (
                             <div
-                                className={cn(
-                                    'group relative max-w-[85%] select-text whitespace-pre-wrap rounded-2xl px-3.5 py-2.5 text-sm leading-6',
-                                    item.role === 'user'
-                                        ? 'rounded-tr-sm bg-primary text-primary-foreground'
-                                        : 'rounded-tl-sm bg-muted/70 text-foreground',
-                                )}
+                                key={item.id}
+                                className={cn('flex items-center gap-2', item.role === 'user' ? 'justify-end' : 'justify-start')}
                             >
-                                {item.text}
                                 {item.role === 'assistant' && (
                                     <button
                                         type="button"
                                         onClick={() => onSpeak(item.text)}
                                         aria-label={t('dialogue.speak')}
-                                        className="absolute -right-8 top-1/2 -translate-y-1/2 rounded-md p-1 text-muted-foreground opacity-0 transition-opacity hover:bg-muted hover:text-foreground group-hover:opacity-100"
+                                        className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground transition-colors hover:text-foreground"
+                                    >
+                                        <Play className="h-3.5 w-3.5" />
+                                    </button>
+                                )}
+                                <div className="flex max-w-[80%] flex-col">
+                                    <div
+                                        className={cn(
+                                            'select-text whitespace-pre-wrap rounded-2xl px-3.5 py-2.5 text-sm leading-6',
+                                            item.role === 'user'
+                                                ? 'rounded-tr-sm bg-primary text-primary-foreground'
+                                                : 'rounded-tl-sm bg-sky-500/15 text-foreground',
+                                        )}
+                                    >
+                                        {item.role === 'assistant' ? `${t('dialogue.aiLabel')}: ${item.text}` : item.text}
+                                    </div>
+                                    {item.hintZh && (
+                                        <div className="mt-1 text-xs leading-5 text-muted-foreground">{item.hintZh}</div>
+                                    )}
+                                    {item.role === 'user' && (
+                                        <CorrectionCard
+                                            correction={item.correction ?? null}
+                                            pending={correctingUserIndex === item.userIndex}
+                                        />
+                                    )}
+                                </div>
+                                {item.role === 'user' && (
+                                    <button
+                                        type="button"
+                                        onClick={() => onSpeak(item.text)}
+                                        aria-label={t('dialogue.speak')}
+                                        className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground transition-colors hover:text-foreground"
                                     >
                                         <Volume2 className="h-3.5 w-3.5" />
                                     </button>
                                 )}
                             </div>
-                            {item.hintZh && (
-                                <div className="mt-1 max-w-[85%] text-xs leading-5 text-muted-foreground">
-                                    {item.hintZh}
+                        ))}
+                    </div>
+
+                    <div className="border-t border-border/50 pt-4">
+                        {waitingForLearner && currentLine ? (
+                            <>
+                                <div className="mb-2 rounded-xl bg-primary/5 px-3 py-2">
+                                    <div className="text-[11px] text-muted-foreground">
+                                        {t('dialogue.yourLine')} · {lines[cursor].speaker === 'a' ? script.roleAName : script.roleBName}
+                                    </div>
+                                    <div className="mt-0.5 text-sm leading-6 text-foreground">
+                                        {buildCue(currentLine, difficulty)}
+                                    </div>
                                 </div>
-                            )}
-                            {item.role === 'user' && (
-                                <CorrectionCard
-                                    correction={item.correction ?? null}
-                                    pending={correctingUserIndex === item.userIndex}
+                                <DialogueComposer
+                                    disabled={finishing || speechPending}
+                                    busy={false}
+                                    onStop={() => undefined}
+                                    onSend={(text, meta) => {
+                                        void handleSend(text, meta);
+                                    }}
                                 />
-                            )}
-                        </div>
-                    ))}
-                </div>
-
-                <div className="border-t border-border/50 pt-4">
-                    {waitingForLearner && currentLine ? (
-                        <>
-                            <div className="mb-2 rounded-xl bg-primary/5 px-3 py-2">
-                                <div className="text-[11px] text-muted-foreground">
-                                    {t('dialogue.yourLine')} · {lines[cursor].speaker === 'a' ? script.roleAName : script.roleBName}
-                                </div>
-                                <div className="mt-0.5 text-sm leading-6 text-foreground">
-                                    {buildCue(currentLine, session.difficulty)}
-                                </div>
+                            </>
+                        ) : (
+                            <div className="py-2 text-center text-xs text-muted-foreground">
+                                {finishedScript ? t('dialogue.scriptDone') : t('dialogue.scriptPlaying')}
                             </div>
-                            <DialogueComposer
-                                disabled={finishing || speechPending}
-                                busy={false}
-                                onStop={() => undefined}
-                                onSend={(text, meta) => {
-                                    void handleSend(text, meta);
-                                }}
-                            />
-                        </>
-                    ) : (
-                        <div className="py-2 text-center text-xs text-muted-foreground">
-                            {finishedScript ? t('dialogue.scriptDone') : t('dialogue.scriptPlaying')}
-                        </div>
-                    )}
-                </div>
+                        )}
+                    </div>
 
-                <div className="flex justify-end">
-                    <Button
-                        type="button"
-                        size="sm"
-                        variant={finishedScript ? 'default' : 'outline'}
-                        className="h-9 rounded-xl px-4 text-sm"
-                        disabled={finishing}
-                        onClick={() => void handleFinish()}
-                    >
-                        {finishing
-                            ? <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
-                            : <CheckCheck className="mr-1 h-3.5 w-3.5" />}
-                        {finishing ? t('dialogue.finishing') : t('dialogue.finish')}
-                    </Button>
-                </div>
-            </section>
+                    <div className="flex justify-end">
+                        <Button
+                            type="button"
+                            size="sm"
+                            variant={finishedScript ? 'default' : 'outline'}
+                            className="h-9 rounded-xl px-4 text-sm"
+                            disabled={finishing}
+                            onClick={() => void handleFinish()}
+                        >
+                            {finishing
+                                ? <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
+                                : <CheckCheck className="mr-1 h-3.5 w-3.5" />}
+                            {finishing ? t('dialogue.finishing') : t('dialogue.finish')}
+                        </Button>
+                    </div>
+                </section>
+
+                {/* 右：发音评测 */}
+                <SpeechScorePanel
+                    result={score}
+                    pending={scoring}
+                    disabled={false}
+                    savingWords={savingWords}
+                    onAddWords={() => void handleAddWords()}
+                    onRetry={() => {
+                        setScore(null);
+                        toast.success(t('dialogue.retryHint'));
+                    }}
+                    onContinue={() => {
+                        setScore(null);
+                    }}
+                />
+            </div>
             <div ref={bottomRef} />
-        </div>
-    );
-
-    return (
-        <div className={cn(
-            'grid min-h-0 gap-4',
-            railOpen && 'lg:grid-cols-[minmax(0,1fr)_320px]',
-        )}>
-            {conversationPane}
-            {railOpen && (
-                // 台词轨自己占一列、自己滚动：高度按窗口算固定值，不再跟着整页一起滚
-                <div className="min-h-0 lg:sticky lg:top-0 lg:h-[calc(100vh-150px)]">
-                    <ClipTranscriptRail
-                        script={script}
-                        focusIndex={activeLineIndex}
-                        onCollapse={() => setRailOpen(false)}
-                    />
-                </div>
-            )}
         </div>
     );
 }
