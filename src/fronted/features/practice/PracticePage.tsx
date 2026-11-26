@@ -759,6 +759,15 @@ export default function PracticePage() {
                                     <Button
                                         type="button"
                                         size="sm"
+                                        variant="ghost"
+                                        className="h-8 rounded-full px-3 text-xs"
+                                        onClick={() => navigate('/review')}
+                                    >
+                                        {t('practice.goReview')}
+                                    </Button>
+                                    <Button
+                                        type="button"
+                                        size="sm"
                                         className="h-8 rounded-full px-3 text-xs"
                                         disabled={queue.length === 0}
                                         onClick={goNext}

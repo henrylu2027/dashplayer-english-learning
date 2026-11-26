@@ -288,6 +288,8 @@
     "srs": {
         "title": "间隔复习",
         "description": "听原声、跟读复测，达标后自动延后",
+        "sourceWord": "生词",
+        "goVocabulary": "词汇工坊",
         "addCurrentSentence": "加入当前句",
         "noCurrentSentence": "先在播放器里打开视频并选中一句",
         "added": "已加入复习",
@@ -467,6 +469,7 @@
         "queueEmptyShort": "点上方导入整视频分句",
         "playThisLine": "播放这一句原声",
         "similarity": "相似度 {{score}}",
+        "goReview": "去间隔复习",
         "weakWords": "发音偏弱的词：",
         "stressWrong": "重音不对：",
         "stressDetail": "应重读第 {{expected}} 个音节，实际听成第 {{heard}} 个"

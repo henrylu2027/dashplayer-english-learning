@@ -288,6 +288,8 @@
     "srs": {
         "title": "Spaced Review",
         "description": "Listen to the original, shadow it, and pass to space it out",
+        "sourceWord": "Word",
+        "goVocabulary": "Vocabulary",
         "addCurrentSentence": "Add current sentence",
         "noCurrentSentence": "Open a video in the player and select a sentence first",
         "added": "Added to review",
@@ -467,6 +469,7 @@
         "queueEmptyShort": "Use Import all lines above",
         "playThisLine": "Play this line",
         "similarity": "Similarity {{score}}",
+        "goReview": "Open review",
         "weakWords": "Weak pronunciation:",
         "stressWrong": "Wrong stress:",
         "stressDetail": "Stress expected on syllable {{expected}}, heard on {{heard}}"

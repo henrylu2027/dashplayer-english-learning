@@ -2,7 +2,8 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { TFunction } from 'i18next';
 import toast from 'react-hot-toast';
-import { BookmarkPlus, Loader2, Repeat, Trash2 } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { BookmarkPlus, BookOpen, Loader2, Repeat, Trash2 } from 'lucide-react';
 
 import type { SrsCard, SrsOverview, SrsReviewOutcome } from '@/common/contracts/srs';
 import { SRS_PASS_SCORE } from '@/common/contracts/srs';
@@ -108,7 +109,11 @@ function SrsCardRow({
             <div className="min-w-0 flex-1">
                 <div className="truncate text-sm text-foreground">{card.referenceText}</div>
                 <div className="mt-0.5 text-xs text-muted-foreground">
-                    {card.sourceKind === 'video' ? t('srs.sourceVideo') : t('srs.sourceFree')}
+                    {card.sourceKind === 'video'
+                        ? t('srs.sourceVideo')
+                        : /\s/.test(card.referenceText.trim())
+                            ? t('srs.sourceFree')
+                            : t('srs.sourceWord')}
                     <span className="mx-1.5">·</span>
                     {t('srs.stage', { stage: card.stage })}
                     <span className="mx-1.5">·</span>
@@ -137,6 +142,7 @@ function SrsCardRow({
  */
 export default function SrsReviewPage() {
     const { t } = useTranslation('pages');
+    const navigate = useNavigate();
     const currentSentence = usePlayer((s) => s.currentSentence);
     const videoPath = useFile((s) => s.videoPath);
     const subtitlePath = useFile((s) => s.subtitlePath);
@@ -244,6 +250,17 @@ export default function SrsReviewPage() {
         <div className="w-full h-full flex flex-col overflow-hidden select-none bg-background text-foreground">
             <div className="flex flex-wrap items-center justify-between gap-3 px-6 pt-5 pb-2">
                 <PageHeader title={t('srs.title')} description={t('srs.description')} />
+                <div className="flex items-center gap-2">
+                <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    className="h-8 rounded-lg px-3 text-xs"
+                    onClick={() => navigate('/vocabulary')}
+                >
+                    <BookOpen className="mr-1 h-3.5 w-3.5" />
+                    {t('srs.goVocabulary')}
+                </Button>
                 <Button
                     type="button"
                     size="sm"
@@ -256,6 +273,7 @@ export default function SrsReviewPage() {
                     {adding ? <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" /> : <BookmarkPlus className="mr-1 h-3.5 w-3.5" />}
                     {t('srs.addCurrentSentence')}
                 </Button>
+                </div>
             </div>
 
             <div className="flex-1 min-h-0 overflow-y-auto px-6 pb-6 pt-2">

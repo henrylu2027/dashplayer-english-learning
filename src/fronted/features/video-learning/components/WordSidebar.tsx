@@ -8,8 +8,9 @@ import {
   SelectTrigger,
   SelectValue
 } from '@/fronted/components/ui/select';
-import { Search, Upload, Download, List, LocateFixed, Pencil, ArrowUpDown } from 'lucide-react';
+import { Search, Upload, Download, List, LocateFixed, Pencil, ArrowUpDown, Repeat } from 'lucide-react';
 import toast from 'react-hot-toast';
+import { srsApi } from '@/fronted/features/srs/srsApi';
 import { cn } from '@/fronted/lib/utils';
 import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso';
 import ConfirmDeleteButton from '@/fronted/components/shared/common/ConfirmDeleteButton';
@@ -71,6 +72,8 @@ export default function WordSidebar({
   const [sortMode, setSortMode] = useState<SortMode>('usage');
   // 正在执行删除请求的单词 id，用于按钮转圈与防重复提交
   const [deletingId, setDeletingId] = useState<number | null>(null);
+  /** 正在把生词批量加入间隔复习。 */
+  const [addingToReview, setAddingToReview] = useState(false);
 
   const displayedWords = useMemo(() => {
     const term = searchTerm.trim().toLowerCase();
@@ -125,6 +128,40 @@ export default function WordSidebar({
     }
   };
 
+  /**
+   * 把生词送进间隔复习：选中的词优先，没有选中就推当前列表里的全部词。
+   *
+   * 每个词作为一张自由文本卡，重复提交是幂等的（后端按文本去重）。
+   */
+  const handleAddToReview = async () => {
+    const targets = selectedWord ? [selectedWord] : displayedWords;
+    if (targets.length === 0) {
+      toast.error(t('wordReviewEmpty'));
+      return;
+    }
+    setAddingToReview(true);
+    let created = 0;
+    let existed = 0;
+    try {
+      for (const word of targets) {
+        const response = await srsApi.addCard({
+          referenceText: word.word,
+          source: { kind: 'free' },
+        });
+        if (response.created) {
+          created += 1;
+        } else {
+          existed += 1;
+        }
+      }
+      toast.success(t('wordReviewAdded', { created, existed }));
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : t('wordReviewFailed'));
+    } finally {
+      setAddingToReview(false);
+    }
+  };
+
   /** 删除确认后调用后端删除并回调页面刷新。 */
   const handleDeleteConfirmed = async (word: WordItem) => {
     setDeletingId(word.id);
@@ -176,6 +213,22 @@ export default function WordSidebar({
                   <SelectItem value="recentVideo">{t('sortByRecentVideo')}</SelectItem>
                 </SelectContent>
               </Select>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-7 w-7 rounded-lg text-muted-foreground hover:text-foreground"
+                    aria-label={t('wordReviewAdd')}
+                    type="button"
+                    disabled={addingToReview}
+                    onClick={() => void handleAddToReview()}
+                  >
+                    <Repeat className={`w-3.5 h-3.5 ${addingToReview ? 'animate-spin' : ''}`} />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>{t('wordReviewAdd')}</TooltipContent>
+              </Tooltip>
               <Tooltip>
                 <TooltipTrigger asChild>
                   <Button
