@@ -5,7 +5,7 @@ import logoLight from '../../../../assets/logo-light.png';
 import logoDark from '../../../../assets/logo-dark.png';
 import useFile from '@/fronted/features/file-browser/fileStore';
 import useSetting from '@/fronted/features/settings/settingsStore';
-import { AudioLines, BookOpen, Captions, LayoutDashboard, MessagesSquare, Mic, PencilLine, Repeat, Rotate3D, Settings, SquareSplitHorizontal, Star, Video } from 'lucide-react';
+import { AudioLines, BookOpen, Captions, LayoutDashboard, MessagesSquare, Mic, PencilLine, Repeat, Rotate3D, Settings, SquareSplitHorizontal, Star, Video, Volume2 } from 'lucide-react';
 import { useTranslation as useI18nTranslation } from 'react-i18next';
 
 export interface SideBarProps {
@@ -96,6 +96,12 @@ const SideBar = ({ compact }: SideBarProps) => {
                     '/shadowing',
                     'shadowing',
                     <Mic />
+                )}
+                {item(
+                    t('originalShadowing'),
+                    '/original',
+                    'original',
+                    <Volume2 />
                 )}
                 {item(
                     t('reviewPlan'),

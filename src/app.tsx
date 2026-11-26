@@ -26,6 +26,7 @@ import FavouritePage from '@/fronted/features/favourite/FavouritePage';
 import VideoLearningPage from '@/fronted/features/video-learning/VideoLearningPage';
 import DubbingExportPage from '@/fronted/features/dubbing/DubbingExportPage';
 import ShadowingPage from '@/fronted/features/shadowing/ShadowingPage';
+import OriginalShadowingPage from '@/fronted/features/original-shadowing/OriginalShadowingPage';
 import SrsReviewPage from '@/fronted/features/srs/SrsReviewPage';
 import DashboardPage from '@/fronted/features/dashboard/DashboardPage';
 import PracticePage from '@/fronted/features/practice/PracticePage';
@@ -186,6 +187,10 @@ export const App = () => {
                                     <Route
                                         path="shadowing"
                                         element={<Eb key="shadowing"><ShadowingPage /></Eb>}
+                                    />
+                                    <Route
+                                        path="original"
+                                        element={<Eb key="original"><OriginalShadowingPage /></Eb>}
                                     />
                                     <Route
                                         path="review"
