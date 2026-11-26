@@ -393,6 +393,18 @@
         "goPlayer": "去播放器",
         "currentSentence": "当前台词",
         "anchorHint": "场景会围绕这句台词展开",
+        "roleDefault": {
+            "a": "说话人 A",
+            "b": "说话人 B"
+        },
+        "scriptTitle": "原片台词",
+        "scriptRange": "第 {{start}}–{{end}} 句 · 共 {{count}} 句",
+        "scriptMore": "还有 {{count}} 句，见右侧轨道",
+        "scriptHint": "台词按对话进度向下滚动；暂未与具体回合对齐",
+        "roleNames": "角色名字",
+        "roleNameHint": "改成视频里的名字，AI 会按这个名字扮演",
+        "learnerRole": "我扮演",
+        "you": "你",
         "difficultyTitle": "难度",
         "difficulty": {
             "basic": "入门",

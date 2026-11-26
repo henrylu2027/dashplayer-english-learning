@@ -393,6 +393,18 @@
         "goPlayer": "Go to player",
         "currentSentence": "Current line",
         "anchorHint": "The scene will be built around this line.",
+        "roleDefault": {
+            "a": "Speaker A",
+            "b": "Speaker B"
+        },
+        "scriptTitle": "Original script",
+        "scriptRange": "Lines {{start}}–{{end}} · {{count}} total",
+        "scriptMore": "{{count}} more lines in the rail",
+        "scriptHint": "Lines scroll with the conversation; per-turn alignment comes later",
+        "roleNames": "Character names",
+        "roleNameHint": "Use the names from the video; the AI plays that character",
+        "learnerRole": "You play",
+        "you": "You",
         "difficultyTitle": "Difficulty",
         "difficulty": {
             "basic": "Starter",

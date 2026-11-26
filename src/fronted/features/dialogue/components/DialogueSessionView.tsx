@@ -6,12 +6,14 @@ import { CheckCheck, Loader2 } from 'lucide-react';
 import type {
     DialogueReview,
     DialogueScene,
+    DialogueScript,
     DialogueSessionSummary,
 } from '@/common/contracts/dialogue';
 import { Button } from '@/fronted/components/ui/button';
 import { getRendererLogger } from '@/fronted/log/simple-logger';
 import { dialogueApi } from '../dialogueApi';
 import { useDialogueChat } from '../useDialogueChat';
+import ClipTranscriptRail from './ClipTranscriptRail';
 import DialogueComposer from './DialogueComposer';
 import DialogueThread from './DialogueThread';
 import SceneCardView from './SceneCardView';
@@ -26,17 +28,20 @@ const logger = getRendererLogger('DialogueSessionView');
  *
  * @param props.session 会话摘要。
  * @param props.scene 场景卡。
+ * @param props.script 原片剧本；为空时不显示右侧台词轨道。
  * @param props.onFinished 复盘完成回调。
  * @param props.onSpeak 朗读回调。
  */
 export default function DialogueSessionView({
     session,
     scene,
+    script,
     onFinished,
     onSpeak,
 }: {
     session: DialogueSessionSummary;
     scene: DialogueScene;
+    script: DialogueScript | null;
     onFinished: (session: DialogueSessionSummary, review: DialogueReview) => void;
     onSpeak: (text: string) => void;
 }) {
@@ -104,8 +109,11 @@ export default function DialogueSessionView({
         }
     };
 
-    return (
-        <div className="flex flex-col gap-4">
+    /** 学习者已发言轮数：台词轨道按它推进滚动位置。 */
+    const userTurnCount = chat.messages.filter((message) => message.role === 'user').length;
+
+    const conversationPane = (
+        <div className="flex min-w-0 flex-col gap-4">
             <SceneCardView scene={scene} onSpeak={onSpeak} />
 
             <section className="flex flex-col gap-4 rounded-2xl border border-border/60 bg-card p-5 shadow-xs">
@@ -150,6 +158,21 @@ export default function DialogueSessionView({
                     </Button>
                 </div>
             </section>
+        </div>
+    );
+
+    if (!script) {
+        return <div className="flex flex-col gap-4">{conversationPane}</div>;
+    }
+
+    return (
+        <div className="grid min-h-0 gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
+            {conversationPane}
+            <div className="min-h-0 lg:sticky lg:top-0 lg:max-h-[calc(100vh-180px)]">
+                <div className="flex h-full min-h-0 flex-col">
+                    <ClipTranscriptRail script={script} userTurnCount={userTurnCount} />
+                </div>
+            </div>
         </div>
     );
 }

@@ -12,7 +12,9 @@ import type {
     DialogueModelBackend,
     DialogueReview,
     DialogueScene,
+    DialogueScript,
     DialogueSessionSummary,
+    DialogueSpeaker,
 } from '@/common/contracts/dialogue';
 import PageHeader from '@/fronted/components/shared/common/PageHeader';
 import { Button } from '@/fronted/components/ui/button';
@@ -25,6 +27,7 @@ import { getTtsUrl, playAudioUrl } from '@/fronted/infrastructure/audio/AudioPla
 import { getRendererLogger } from '@/fronted/log/simple-logger';
 import { cn } from '@/fronted/lib/utils';
 import { dialogueApi } from './dialogueApi';
+import ClipTranscriptRail from './components/ClipTranscriptRail';
 import DialogueSessionView from './components/DialogueSessionView';
 import HistoryList from './components/HistoryList';
 import ReviewPanel from './components/ReviewPanel';
@@ -35,6 +38,10 @@ const logger = getRendererLogger('DialoguePage');
 
 /** 历史列表条数。 */
 const HISTORY_LIMIT = 10;
+
+/** 剧本默认截取范围：锚点句前后各取几句。 */
+const SCRIPT_WINDOW_BEFORE = 4;
+const SCRIPT_WINDOW_AFTER = 5;
 
 /**
  * 场景对话页：从当前台词生成角色扮演场景，语音或文字演完，结束后复盘。
@@ -55,12 +62,20 @@ export default function DialoguePage() {
     const [difficulty, setDifficulty] = useState<DialogueDifficulty>('basic');
     const [backend, setBackend] = useState<DialogueModelBackend>('local');
     const [creating, setCreating] = useState(false);
-    const [active, setActive] = useState<{ session: DialogueSessionSummary; scene: DialogueScene } | null>(null);
+    const [active, setActive] = useState<{
+        session: DialogueSessionSummary;
+        scene: DialogueScene;
+        script: DialogueScript | null;
+    } | null>(null);
     const [review, setReview] = useState<DialogueReview | null>(null);
     const [history, setHistory] = useState<DialogueSessionSummary[]>([]);
     const [historyDetail, setHistoryDetail] = useState<DialogueDetail | null>(null);
     const [detailLoading, setDetailLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
+    /** 剧本角色名：默认留空，界面回落到「说话人 A/B」，学习者可改成视频里的名字。 */
+    const [roleAName, setRoleAName] = useState('');
+    const [roleBName, setRoleBName] = useState('');
+    const [learnerRole, setLearnerRole] = useState<DialogueSpeaker>('a');
     /** 只在首次拿到可用性时选默认后端，之后不覆盖用户的选择。 */
     const backendInitializedRef = useRef(false);
 
@@ -124,6 +139,62 @@ export default function DialoguePage() {
             .slice(Math.max(0, position - 3), position + 4)
             .map((item) => item.text);
     }, [currentSentence, sentences]);
+
+    /** 剧本里的角色显示名；留空时用匿名默认值。 */
+    const resolvedRoleA = roleAName.trim() || t('dialogue.roleDefault.a');
+    const resolvedRoleB = roleBName.trim() || t('dialogue.roleDefault.b');
+
+    /**
+     * 从当前视频截取一段真实台词作为剧本。
+     *
+     * 说明：字幕文件没有说话人字段，这里按顺序交替分配 A/B 作为近似，
+     * 界面上会明确提示「自动分配、可能不准」。锚点不在序列里时退化为单句。
+     */
+    const script = useMemo<DialogueScript | null>(() => {
+        if (!currentSentence) {
+            return null;
+        }
+        const ordered = [...sentences].sort((a, b) => a.index - b.index);
+        const position = ordered.findIndex((item) => item.index === currentSentence.index);
+        const toScriptLine = (index: number, text: string, zh: string | undefined, speaker: DialogueSpeaker) => ({
+            index,
+            en: text,
+            ...(zh && zh.trim() ? { zh } : {}),
+            speaker,
+        });
+        if (position < 0) {
+            return {
+                videoKey: currentSentence.fileHash,
+                startIndex: currentSentence.index,
+                endIndex: currentSentence.index,
+                lines: [toScriptLine(currentSentence.index, currentSentence.text, currentSentence.textZH, 'a')],
+                roleAName: resolvedRoleA,
+                roleBName: resolvedRoleB,
+                learnerRole,
+            };
+        }
+        const slice = ordered.slice(
+            Math.max(0, position - SCRIPT_WINDOW_BEFORE),
+            Math.min(ordered.length, position + SCRIPT_WINDOW_AFTER + 1),
+        );
+        if (slice.length === 0) {
+            return null;
+        }
+        return {
+            videoKey: currentSentence.fileHash,
+            startIndex: slice[0].index,
+            endIndex: slice[slice.length - 1].index,
+            lines: slice.map((item, offset) => toScriptLine(
+                item.index,
+                item.text,
+                item.textZH,
+                offset % 2 === 0 ? 'a' : 'b',
+            )),
+            roleAName: resolvedRoleA,
+            roleBName: resolvedRoleB,
+            learnerRole,
+        };
+    }, [currentSentence, sentences, resolvedRoleA, resolvedRoleB, learnerRole]);
 
     /**
      * 收集当前视频里学习者练过的台词，作为场景取材。
@@ -214,17 +285,18 @@ export default function DialoguePage() {
         setReview(null);
         setHistoryDetail(null);
         try {
-            // 取材：优先用这个视频里练过的句子，不足 3 句时自动补齐
-            const focusLines = await collectFocusLines();
+            // 有剧本时场景围绕真实台词展开，不再去翻练习记录取材
+            const focusLines = script ? [] : await collectFocusLines();
             const result = await dialogueApi.create({
                 anchorText: currentSentence.text,
                 paragraphLines,
                 focusLines,
                 source: buildVideoShadowingSource(currentSentence, videoPath, subtitlePath),
+                ...(script ? { script } : {}),
                 difficulty,
                 backend,
             });
-            setActive({ session: result.session, scene: result.scene });
+            setActive({ session: result.session, scene: result.scene, script: result.script });
             await refreshHistory();
         } catch (createError) {
             logger.error('场景生成失败', { error: createError });
@@ -266,8 +338,13 @@ export default function DialoguePage() {
 
     const renderMain = () => {
         if (historyDetail) {
+            const detail = historyDetail;
             return (
-                <>
+                <div className={cn(
+                    'grid min-h-0 gap-4',
+                    detail.script && 'lg:grid-cols-[minmax(0,1fr)_320px]',
+                )}>
+                    <div className="flex min-w-0 flex-col gap-4">
                     <section className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-border/60 bg-card px-4 py-3 shadow-xs">
                         <div className="min-w-0">
                             <div className="truncate text-sm font-medium text-foreground">{historyDetail.session.title}</div>
@@ -315,7 +392,16 @@ export default function DialoguePage() {
                             {t('dialogue.unfinished')}
                         </section>
                     )}
-                </>
+                    </div>
+                    {detail.script && (
+                        <div className="min-h-0 lg:sticky lg:top-0 lg:max-h-[calc(100vh-180px)]">
+                            <ClipTranscriptRail
+                                script={detail.script}
+                                userTurnCount={detail.turns.filter((turn) => turn.role === 'user').length}
+                            />
+                        </div>
+                    )}
+                </div>
             );
         }
         if (review) {
@@ -327,6 +413,7 @@ export default function DialoguePage() {
                     key={active.session.id}
                     session={active.session}
                     scene={active.scene}
+                    script={active.script}
                     onFinished={(session, result) => {
                         void handleFinished(session, result);
                     }}
@@ -361,10 +448,17 @@ export default function DialoguePage() {
                 )}
                 <SceneSetupCard
                     anchorText={currentSentence.text}
+                    script={script}
+                    roleAName={roleAName}
+                    roleBName={roleBName}
+                    learnerRole={learnerRole}
                     availability={availability}
                     difficulty={difficulty}
                     backend={backend}
                     creating={creating}
+                    onRoleANameChange={setRoleAName}
+                    onRoleBNameChange={setRoleBName}
+                    onLearnerRoleChange={setLearnerRole}
                     onDifficultyChange={setDifficulty}
                     onBackendChange={setBackend}
                     onCreate={() => void handleCreate()}
@@ -380,7 +474,10 @@ export default function DialoguePage() {
             </div>
 
             <div className="flex-1 min-h-0 overflow-y-auto px-6 pb-6 pt-2">
-                <div className="mx-auto flex w-full max-w-4xl flex-col gap-4">
+                <div className={cn(
+                    'mx-auto flex w-full flex-col gap-4',
+                    (active || historyDetail) ? 'max-w-6xl' : 'max-w-4xl',
+                )}>
                     {detailLoading && (
                         <div className="flex items-center justify-center gap-2 rounded-2xl border border-border/60 bg-card px-4 py-8 text-sm text-muted-foreground">
                             <Loader2 className="h-4 w-4 animate-spin" />
