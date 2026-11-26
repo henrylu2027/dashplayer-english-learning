@@ -24,8 +24,8 @@ import SceneCardView from './SceneCardView';
 
 const logger = getRendererLogger('DialogueSessionView');
 
-/** AI 吐出下一句原台词前的停顿，让轮次看起来像对话而不是瞬间刷屏。 */
-const AI_LINE_DELAY_MS = 900;
+/** 轮到 AI 时的起手停顿；真正的节奏由"上一句读完"决定。 */
+const AI_LINE_DELAY_MS = 400;
 
 /**
  * 对话中的一条消息。
@@ -107,6 +107,8 @@ export default function DialogueSessionView({
     const [cursor, setCursor] = useState(startPosition);
     /** 正在纠错的学习者发言序号。 */
     const [correctingUserIndex, setCorrectingUserIndex] = useState<number | null>(null);
+    /** 是否有一句台词正在朗读；朗读期间不接受新的输入，避免连发。 */
+    const [speechPending, setSpeechPending] = useState(false);
     const [finishing, setFinishing] = useState(false);
     /** 学习者扮演哪一方；可以在对话中随时互换。 */
     const [learnerRole, setLearnerRole] = useState<DialogueSpeaker>(script?.learnerRole ?? 'a');
@@ -117,10 +119,17 @@ export default function DialogueSessionView({
     const persistedRef = useRef<Set<string>>(new Set());
     /** 朗读队列：上一句读完再读下一句，避免互相打断。 */
     const speechQueueRef = useRef<Promise<void>>(Promise.resolve());
+    /** 组件是否还挂着；朗读结束回调里避免对已卸载组件 setState。 */
+    const mountedRef = useRef(true);
 
-    const enqueueSpeech = useCallback((text: string): void => {
+    /**
+     * 把一句台词排进朗读队列。
+     * @param text 待朗读文本。
+     * @returns 这句读完（或失败）后 resolve 的 promise；调用方据此控制台词推进节奏。
+     */
+    const enqueueSpeech = useCallback((text: string): Promise<void> => {
         if (!text.trim()) {
-            return;
+            return Promise.resolve();
         }
         speechQueueRef.current = speechQueueRef.current
             .then(async () => {
@@ -130,6 +139,7 @@ export default function DialogueSessionView({
             .catch((error) => {
                 logger.warn('朗读失败', { error });
             });
+        return speechQueueRef.current;
     }, []);
 
     const currentLine = cursor < lines.length ? lines[cursor] : null;
@@ -157,9 +167,15 @@ export default function DialogueSessionView({
             setItems((previous) => [...previous, { id, role: 'assistant', text: line.en, hintZh: line.zh }]);
             // 右侧停在这句：AI 正在说的就是它
             setActiveLineIndex(cursor);
-            setCursor((value) => value + 1);
-            // 台词出现的同一时刻读出来
-            enqueueSpeech(line.en);
+            // 台词出现的同一时刻读出来；这句读完才轮到下一句
+            setSpeechPending(true);
+            const spoken = enqueueSpeech(line.en);
+            void spoken.then(() => {
+                if (mountedRef.current) {
+                    setSpeechPending(false);
+                    setCursor((value) => value + 1);
+                }
+            });
             if (!persistedRef.current.has(id)) {
                 persistedRef.current.add(id);
                 void dialogueApi.appendTurn({
@@ -177,6 +193,10 @@ export default function DialogueSessionView({
     useEffect(() => {
         bottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
     }, [items, finishing]);
+
+    useEffect(() => () => {
+        mountedRef.current = false;
+    }, []);
 
     const handleSend = async (text: string, meta?: { lowConfidenceWords: string[] }): Promise<void> => {
         const userIndex = items.filter((item) => item.role === 'user').length;
@@ -200,12 +220,16 @@ export default function DialogueSessionView({
             userIndex,
             correction: null,
         }]);
-        // 学习者这句也读一遍：作为标准发音示范
-        enqueueSpeech(text);
         // 右侧停到学习者刚说的那句
         setActiveLineIndex(cursor);
-        // 说一句就往下走一句，不卡在学习者这一轮
-        setCursor((value) => value + 1);
+        // 学习者这句也读一遍：作为标准发音示范；这句读完才轮到 AI 接话
+        setSpeechPending(true);
+        void enqueueSpeech(text).then(() => {
+            if (mountedRef.current) {
+                setSpeechPending(false);
+                setCursor((value) => value + 1);
+            }
+        });
         setCorrectingUserIndex(userIndex);
         dialogueApi.correctTurn({
             sessionId: session.id,
@@ -334,7 +358,7 @@ export default function DialogueSessionView({
                                 </div>
                             </div>
                             <DialogueComposer
-                                disabled={finishing}
+                                disabled={finishing || speechPending}
                                 busy={false}
                                 onStop={() => undefined}
                                 onSend={(text, meta) => {
