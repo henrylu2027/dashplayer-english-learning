@@ -4,7 +4,7 @@
 > This is a community modification, **not** an official DashPlayer release.
 
 [![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0-blue.svg)](LICENSE)
-![Electron](https://img.shields.io/badge/Electron-54-47848F?logo=electron)
+![Electron](https://img.shields.io/badge/Electron-45-47848F?logo=electron)
 ![React](https://img.shields.io/badge/React-19-61DAFB?logo=react)
 ![TypeScript](https://img.shields.io/badge/TypeScript-5-3178C6?logo=typescript)
 
