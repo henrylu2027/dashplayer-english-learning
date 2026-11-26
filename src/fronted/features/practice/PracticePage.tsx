@@ -358,6 +358,11 @@ export default function PracticePage() {
     /** 模型给的语法问题与相似度。 */
     const grammarIssues = dictation?.grammarIssues ?? retell?.grammarIssues ?? [];
     const similarity = dictation?.similarityScore ?? retell?.similarityScore ?? null;
+    /** 声学发音评分里最弱的词（低于 80 分，最多 5 个）。 */
+    const pronunciationWeak = (retell?.pronunciationWords ?? [])
+        .filter((item) => item.score < 80)
+        .sort((left, right) => left.score - right.score)
+        .slice(0, 5);
 
     /** 一键加入生词本（词汇工坊）。 */
     const handleAddWords = async (): Promise<void> => {
@@ -642,6 +647,25 @@ export default function PracticePage() {
                                         <p className="text-sm text-muted-foreground">{t('practice.noRecognized')}</p>
                                     )}
                                 </div>
+
+                                {pronunciationWeak.length > 0 && (
+                                    <div className="mt-2 flex flex-wrap items-center gap-1.5 text-xs">
+                                        <span className="text-muted-foreground">{t('practice.weakWords')}</span>
+                                        {pronunciationWeak.map((item) => (
+                                            <span
+                                                key={item.word}
+                                                className={cn(
+                                                    'rounded-md px-1.5 py-0.5 tabular-nums',
+                                                    item.score < 60
+                                                        ? 'bg-red-500/10 text-red-600 dark:text-red-400'
+                                                        : 'bg-amber-500/10 text-amber-700 dark:text-amber-300',
+                                                )}
+                                            >
+                                                {item.word} · {item.score}
+                                            </span>
+                                        ))}
+                                    </div>
+                                )}
 
                                 {(grammarIssues.length > 0 || similarity !== null) && (
                                     <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">

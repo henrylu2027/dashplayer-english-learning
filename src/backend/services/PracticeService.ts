@@ -17,6 +17,8 @@ import type RecordedSpeechService from '@/backend/services/speech/RecordedSpeech
 import type SentenceAudioService from '@/backend/services/SentenceAudioService';
 import type OllamaGrader from '@/backend/services/practice/OllamaGrader';
 import type { PracticeGrade } from '@/backend/services/practice/OllamaGrader';
+import type PronunciationService from '@/backend/services/practice/PronunciationService';
+import type { PronunciationResult } from '@/backend/services/practice/PronunciationService';
 import type PracticeAttemptRepository from '@/backend/services/repositories/PracticeAttemptRepository';
 import { alignText } from '@/backend/services/shadowing/ShadowingScorer';
 import { normalizeShadowingSource } from '@/backend/services/shadowing/ShadowingSource';
@@ -95,6 +97,9 @@ export class PracticeServiceImpl implements PracticeService {
     @inject(TYPES.OllamaGrader)
     private ollamaGrader!: OllamaGrader;
 
+    @inject(TYPES.PronunciationService)
+    private pronunciationService!: PronunciationService;
+
     public async dictation(request: DictationRequest): Promise<DictationResult> {
         const referenceText = this.validateReferenceText(request.referenceText);
         const typedText = request.typedText.trim();
@@ -130,6 +135,7 @@ export class PracticeServiceImpl implements PracticeService {
             correctWordCount: alignment.correctWordCount,
             accuracy,
             ...grade,
+            pronunciationWords: [],
         };
     }
 
@@ -137,11 +143,27 @@ export class PracticeServiceImpl implements PracticeService {
         const referenceText = this.validateReferenceText(request.referenceText);
         const source = normalizeShadowingSource(request.source);
         const job = `practice-retell:${randomUUID()}`;
+        // 转写与声学发音评分互不依赖，并行跑省掉一半等待
+        const pronunciationPromise = this.pronunciationService
+            .score({
+                audio: request.audio,
+                mimeType: request.mimeType,
+                referenceText,
+                job,
+            })
+            .catch((error: unknown) => {
+                this.logger.warn('pronunciation scoring failed', {
+                    job,
+                    error: error instanceof Error ? error.message : String(error),
+                });
+                return null;
+            });
         const speech = await this.recordedSpeechService.transcribe({
             audio: request.audio,
             mimeType: request.mimeType,
             job,
         });
+        const pronunciation: PronunciationResult | null = await pronunciationPromise;
 
         const keywords = extractRetellKeywords(referenceText);
         const recognizedWords = new Set(
@@ -188,6 +210,9 @@ export class PracticeServiceImpl implements PracticeService {
             coverage,
             words: alignment.words,
             ...grade,
+            // 声学评分优先；侧车不可用时退回模型的文本判断，并把来源说明留给日志
+            pronunciationScore: pronunciation?.score ?? grade.pronunciationScore,
+            pronunciationWords: pronunciation?.words ?? [],
         };
     }
 

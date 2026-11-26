@@ -37,6 +37,7 @@ const TYPES = {
     PracticeService: Symbol('PracticeService'),
     PracticeAttemptRepository: Symbol('PracticeAttemptRepository'),
     OllamaGrader: Symbol('OllamaGrader'),
+    PronunciationService: Symbol('PronunciationService'),
     DialogueService: Symbol('DialogueService'),
     DialogueRepository: Symbol('DialogueRepository'),
     SplitVideoService: Symbol('SplitVideoService'),

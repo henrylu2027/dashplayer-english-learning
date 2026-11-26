@@ -466,7 +466,8 @@
         "graderUnavailable": "Local model grading unavailable",
         "queueEmptyShort": "Use Import all lines above",
         "playThisLine": "Play this line",
-        "similarity": "Similarity {{score}}"
+        "similarity": "Similarity {{score}}",
+        "weakWords": "Weak pronunciation:"
     },
     "dialogue": {
         "title": "Scene Dialogue",

@@ -71,6 +71,8 @@ export interface DictationResult {
     grammarScore: number | null;
     /** 发音分，0~100；听写没有录音，固定为 null。 */
     pronunciationScore: number | null;
+    /** 逐词发音分；听写没有录音，固定为空数组。 */
+    pronunciationWords: Array<{ word: string; score: number }>;
     /** 与参考句的相似度，0~100；模型不可用时为 null。 */
     similarityScore: number | null;
     /** 语句层面的问题，形如「时态：过去时写成了现在时」；模型不可用时为空数组。 */
@@ -125,8 +127,10 @@ export interface RetellResult {
     words: ShadowingWordFeedback[];
     /** 本地模型给出的语法分，0~100；模型不可用时为 null。 */
     grammarScore: number | null;
-    /** 本地模型给出的发音分，0~100；模型不可用时为 null。 */
+    /** 发音分，0~100；复述由本地声学模型给出，听写无录音为 null。 */
     pronunciationScore: number | null;
+    /** 逐词发音分，标出偏差最大的词；没有声学评分时为空数组。 */
+    pronunciationWords: Array<{ word: string; score: number }>;
     /** 与参考句的相似度，0~100；模型不可用时为 null。 */
     similarityScore: number | null;
     /** 语句层面的问题，形如「时态：过去时写成了现在时」；模型不可用时为空数组。 */

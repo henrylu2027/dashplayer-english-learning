@@ -118,3 +118,7 @@ ios/DashPlayerMobile.xcodeproj/
 # Electron Forge æ‰“åŒ…äº§ç‰©ï¼ˆä½“ç§¯å¤§ï¼Œä¸å…¥åº“ï¼‰
 /out/
 /out-*/
+
+# ·¢ÒôÆÀ¹À²à³µ£ºĞéÄâ»·¾³ÓëÄ£ĞÍÈ¨ÖØ²»Èë¿â
+tools/pron-sidecar/.venv/
+tools/pron-sidecar/models/

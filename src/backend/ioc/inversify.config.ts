@@ -76,6 +76,8 @@ import type PracticeService from '@/backend/services/PracticeService';
 import { PracticeServiceImpl } from '@/backend/services/PracticeService';
 import type OllamaGrader from '@/backend/services/practice/OllamaGrader';
 import { OllamaGraderImpl } from '@/backend/services/practice/OllamaGrader';
+import type PronunciationService from '@/backend/services/practice/PronunciationService';
+import { PronunciationServiceImpl } from '@/backend/services/practice/PronunciationService';
 import PracticeController from '@/backend/controllers/PracticeController';
 import type PracticeAttemptRepository from '@/backend/services/repositories/PracticeAttemptRepository';
 import PracticeAttemptRepositoryImpl from '@/backend/infrastructure/db/repositories/PracticeAttemptRepositoryImpl';
@@ -300,6 +302,7 @@ container.bind<SentenceAudioService>(TYPES.SentenceAudioService).to(SentenceAudi
 container.bind<RecordedSpeechService>(TYPES.RecordedSpeechService).to(RecordedSpeechServiceImpl).inSingletonScope();
 container.bind<PracticeService>(TYPES.PracticeService).to(PracticeServiceImpl).inSingletonScope();
     container.bind<OllamaGrader>(TYPES.OllamaGrader).to(OllamaGraderImpl).inSingletonScope();
+    container.bind<PronunciationService>(TYPES.PronunciationService).to(PronunciationServiceImpl).inSingletonScope();
 container.bind<PracticeAttemptRepository>(TYPES.PracticeAttemptRepository)
     .to(PracticeAttemptRepositoryImpl)
     .inSingletonScope();
