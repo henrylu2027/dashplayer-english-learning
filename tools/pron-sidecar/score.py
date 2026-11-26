@@ -16,11 +16,12 @@ from __future__ import annotations
 
 import argparse
 import json
-import math
+import re
 import sys
 import wave
 from pathlib import Path
 
+import cmudict
 import numpy as np
 import onnxruntime as ort
 
@@ -31,6 +32,9 @@ TOKENIZER_PATH = HERE / "models" / "tokenizer.json"
 SAMPLE_RATE = 16000
 PAD_TOKEN = "<pad>"
 WORD_SEPARATOR = "|"
+
+#: CMU 发音词典；重音位置按其中的数字标记得出
+PRON_DICT = cmudict.dict()
 
 
 def load_vocab() -> dict[str, int]:
@@ -89,8 +93,8 @@ def encode_text(text: str, vocab: dict[str, int]) -> tuple[list[int], list[int]]
     return tokens, word_of_token
 
 
-def ctc_align(probs: np.ndarray, tokens: list[int], blank: int) -> np.ndarray:
-    """CTC 强制对齐，返回每个 token 的对数概率（取最优路径）。"""
+def ctc_align(probs: np.ndarray, tokens: list[int], blank: int) -> tuple[np.ndarray, np.ndarray]:
+    """CTC 强制对齐，返回每个 token 的后验概率与帧区间。"""
     frames = probs.shape[0]
     if not tokens:
         raise RuntimeError("参考句没有可对齐的字母")
@@ -134,18 +138,21 @@ def ctc_align(probs: np.ndarray, tokens: list[int], blank: int) -> np.ndarray:
     state = end_states[final]
 
     token_probs = np.zeros(len(tokens), dtype=np.float64)
-    seen = np.zeros(len(tokens), dtype=bool)
+    token_start = np.full(len(tokens), -1, dtype=np.int32)
+    token_end = np.full(len(tokens), -1, dtype=np.int32)
     for t in range(frames - 1, -1, -1):
         if state % 2 == 1:
             index = (state - 1) // 2
             token_probs[index] = probs[t, extended[state]]
-            seen[index] = True
+            if token_end[index] < 0:
+                token_end[index] = t
+            token_start[index] = t
         if t == 0:
             break
         state -= int(back[t, state])
-    if not seen.any():
+    if (token_end < 0).all():
         raise RuntimeError("对齐失败")
-    return token_probs
+    return token_probs, np.stack([token_start, token_end], axis=1)
 
 
 def score_words(text: str, token_probs: np.ndarray, word_of_token: list[int]) -> list[dict]:
@@ -167,6 +174,86 @@ def score_words(text: str, token_probs: np.ndarray, word_of_token: list[int]) ->
             "score": int(round(max(0.0, min(1.0, mean)) * 100)),
         })
     return words
+
+
+def frame_energy(samples: np.ndarray, frames: int, hop: int = 320) -> np.ndarray:
+    """把波形按帧切成 RMS 能量，长度与模型输出的帧数对齐。"""
+    energy = np.zeros(frames, dtype=np.float64)
+    for index in range(frames):
+        start = index * hop
+        end = min(start + hop, samples.size)
+        if start >= samples.size:
+            break
+        chunk = samples[start:end]
+        energy[index] = float(np.sqrt(np.mean(chunk * chunk)))
+    return energy
+
+
+def word_targets(word: str) -> tuple[int, int] | None:
+    """查 CMU 词典，返回该词的（音节数，重读音节下标）。"""
+    key = re.sub(r"[^a-z']", "", word.lower())
+    if not key:
+        return None
+    entries = PRON_DICT.get(key)
+    if not entries:
+        return None
+    phones = entries[0]
+    vowel_indexes = [index for index, phone in enumerate(phones) if phone[-1:].isdigit()]
+    if not vowel_indexes:
+        return None
+    stresses = [phones[index][-1] for index in vowel_indexes]
+    if "1" in stresses:
+        stressed = stresses.index("1")
+    elif "2" in stresses:
+        stressed = stresses.index("2")
+    else:
+        stressed = 0
+    return len(vowel_indexes), stressed
+
+
+def analyze_stress(
+    words: list[dict],
+    token_frames: np.ndarray,
+    word_of_token: list[int],
+    energy: np.ndarray,
+) -> None:
+    """按词比较「实际最响的音节」与词典重音位置，写回 words。"""
+    spans: dict[int, list[int]] = {}
+    for frames, word_index in zip(token_frames, word_of_token):
+        start, end = int(frames[0]), int(frames[1])
+        if end < 0:
+            continue
+        current = spans.get(word_index)
+        if current is None:
+            spans[word_index] = [start, end]
+        else:
+            current[0] = min(current[0], start)
+            current[1] = max(current[1], end)
+
+    for index, word in enumerate(words):
+        target = word_targets(word["word"])
+        span = spans.get(index)
+        if target is None or span is None:
+            word["stress"] = None
+            continue
+        syllables, stressed = target
+        start, end = span
+        if syllables <= 1 or end <= start or energy.size == 0:
+            word["stress"] = None
+            continue
+        edges = np.linspace(start, end + 1, syllables + 1).astype(int)
+        means = []
+        for part in range(syllables):
+            lo = max(0, edges[part])
+            hi = min(energy.size, max(edges[part + 1], lo + 1))
+            means.append(float(np.mean(energy[lo:hi])) if hi > lo else 0.0)
+        heard = int(np.argmax(means))
+        word["stress"] = {
+            "expected": stressed,
+            "heard": heard,
+            "ok": heard == stressed,
+            "syllables": syllables,
+        }
 
 
 def main() -> int:
@@ -195,12 +282,18 @@ def main() -> int:
     probs = np.exp(shifted)
     probs /= probs.sum(axis=1, keepdims=True)
 
-    token_probs = ctc_align(probs, tokens, blank)
+    token_probs, token_frames = ctc_align(probs, tokens, blank)
     words = score_words(args.text, token_probs, word_of_token)
+    energy = frame_energy(samples, probs.shape[0])
+    analyze_stress(words, token_frames, word_of_token, energy)
     overall = int(round(float(np.mean(token_probs)) * 100))
+    stress_checked = [word for word in words if word.get("stress")]
+    stress_ok = sum(1 for word in stress_checked if word["stress"]["ok"])
     payload = {
         "score": max(0, min(100, overall)),
         "words": words,
+        "stressChecked": len(stress_checked),
+        "stressOk": stress_ok,
         "durationSec": round(samples.size / SAMPLE_RATE, 2),
         "model": "wav2vec2-base-960h",
     }

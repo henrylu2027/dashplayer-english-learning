@@ -467,7 +467,9 @@
         "queueEmptyShort": "Use Import all lines above",
         "playThisLine": "Play this line",
         "similarity": "Similarity {{score}}",
-        "weakWords": "Weak pronunciation:"
+        "weakWords": "Weak pronunciation:",
+        "stressWrong": "Wrong stress:",
+        "stressDetail": "Stress expected on syllable {{expected}}, heard on {{heard}}"
     },
     "dialogue": {
         "title": "Scene Dialogue",

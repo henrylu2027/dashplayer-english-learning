@@ -358,10 +358,13 @@ export default function PracticePage() {
     /** 模型给的语法问题与相似度。 */
     const grammarIssues = dictation?.grammarIssues ?? retell?.grammarIssues ?? [];
     const similarity = dictation?.similarityScore ?? retell?.similarityScore ?? null;
-    /** 声学发音评分里最弱的词（低于 80 分，最多 5 个）。 */
+    /** 声学发音评分里最弱的词（低于 80 分）与重音不对的词，最多各取 5 个。 */
     const pronunciationWeak = (retell?.pronunciationWords ?? [])
         .filter((item) => item.score < 80)
         .sort((left, right) => left.score - right.score)
+        .slice(0, 5);
+    const stressMismatch = (retell?.pronunciationWords ?? [])
+        .filter((item) => item.stress !== null && !item.stress.ok)
         .slice(0, 5);
 
     /** 一键加入生词本（词汇工坊）。 */
@@ -662,6 +665,24 @@ export default function PracticePage() {
                                                 )}
                                             >
                                                 {item.word} · {item.score}
+                                            </span>
+                                        ))}
+                                    </div>
+                                )}
+
+                                {stressMismatch.length > 0 && (
+                                    <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-xs">
+                                        <span className="text-muted-foreground">{t('practice.stressWrong')}</span>
+                                        {stressMismatch.map((item) => (
+                                            <span
+                                                key={`stress-${item.word}`}
+                                                title={t('practice.stressDetail', {
+                                                    expected: (item.stress?.expected ?? 0) + 1,
+                                                    heard: (item.stress?.heard ?? 0) + 1,
+                                                })}
+                                                className="rounded-md bg-violet-500/10 px-1.5 py-0.5 text-violet-700 dark:text-violet-300"
+                                            >
+                                                {item.word}
                                             </span>
                                         ))}
                                     </div>

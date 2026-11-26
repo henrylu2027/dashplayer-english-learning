@@ -467,7 +467,9 @@
         "queueEmptyShort": "点上方导入整视频分句",
         "playThisLine": "播放这一句原声",
         "similarity": "相似度 {{score}}",
-        "weakWords": "发音偏弱的词："
+        "weakWords": "发音偏弱的词：",
+        "stressWrong": "重音不对：",
+        "stressDetail": "应重读第 {{expected}} 个音节，实际听成第 {{heard}} 个"
     },
     "dialogue": {
         "title": "场景对话",

@@ -15,6 +15,20 @@ import { StorageDirectoryTarget } from '@/backend/services/gateways/storage/Stor
 const execFileAsync = promisify(execFile);
 
 /**
+ * 一个词的重音检查结果（仅多音节词有）。
+ */
+export interface PronunciationStress {
+    /** 词典标注的重读音节下标（从 0 开始）。 */
+    expected: number;
+    /** 按能量峰值判断的实际重读音节下标。 */
+    heard: number;
+    /** 两者是否一致。 */
+    ok: boolean;
+    /** 音节总数。 */
+    syllables: number;
+}
+
+/**
  * 一个词的发音分。
  */
 export interface PronunciationWordScore {
@@ -22,6 +36,8 @@ export interface PronunciationWordScore {
     word: string;
     /** 该词发音分，0~100。 */
     score: number;
+    /** 重音检查；单音节词或缺词典条目时为 null。 */
+    stress: PronunciationStress | null;
 }
 
 /**
@@ -74,6 +90,31 @@ const AUDIO_EXTENSION_BY_MIME: Record<string, string> = {
     'audio/wav': 'wav',
     'audio/x-wav': 'wav',
 };
+
+/**
+ * 解析侧车给出的重音检查结果。
+ *
+ * @param raw 侧车 JSON 里的 stress 字段。
+ * @returns 结构化重音结果；缺失或格式非法时为 null。
+ */
+function parseStress(raw: unknown): PronunciationStress | null {
+    if (!raw || typeof raw !== 'object') {
+        return null;
+    }
+    const record = raw as { expected?: unknown; heard?: unknown; ok?: unknown; syllables?: unknown };
+    const expected = Number(record.expected);
+    const heard = Number(record.heard);
+    const syllables = Number(record.syllables);
+    if (!Number.isInteger(expected) || !Number.isInteger(heard) || !Number.isInteger(syllables)) {
+        return null;
+    }
+    return {
+        expected,
+        heard,
+        ok: record.ok === true || expected === heard,
+        syllables,
+    };
+}
 
 /**
  * 解析临时文件扩展名。
@@ -162,7 +203,7 @@ export class PronunciationServiceImpl implements PronunciationService {
         const data = parsed as {
             error?: unknown;
             score?: unknown;
-            words?: Array<{ word?: unknown; score?: unknown }>;
+            words?: Array<{ word?: unknown; score?: unknown; stress?: unknown }>;
             model?: unknown;
             durationSec?: unknown;
         };
@@ -185,6 +226,7 @@ export class PronunciationServiceImpl implements PronunciationService {
                 .map((item) => ({
                     word: typeof item.word === 'string' ? item.word : '',
                     score: Number(item.score) || 0,
+                    stress: parseStress(item.stress),
                 }))
                 .filter((item) => item.word.length > 0),
             model: typeof data.model === 'string' ? data.model : 'wav2vec2',

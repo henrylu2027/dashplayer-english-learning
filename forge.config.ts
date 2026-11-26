@@ -310,7 +310,7 @@ const config: ForgeConfig = {
         extendInfo: {
             NSMicrophoneUsageDescription: 'DashPlayer 需要使用麦克风录制配音与跟读音频。',
         },
-        extraResource: ['./drizzle', './lib', './scripts', './resources'],
+        extraResource: ['./drizzle', './lib', './scripts', './resources', './tools/pron-sidecar'],
         // Linux 命名统一为不带横杠的 dashplayer：此处 executableName、各 Linux maker 的
         // name/bin 与 package.json 的 desktopName 必须一致，桌面环境才能把窗口（Wayland
         // app_id / X11 WM_CLASS）匹配到安装包里的 dashplayer.desktop，否则 Dock 只显示通用占位图标。
