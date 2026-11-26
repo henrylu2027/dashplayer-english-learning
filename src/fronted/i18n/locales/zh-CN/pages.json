@@ -405,6 +405,14 @@
         "roleNameHint": "改成视频里的名字，AI 会按这个名字扮演",
         "learnerRole": "我扮演",
         "you": "你",
+        "correctionKind": {
+            "grammar": "语法",
+            "wording": "用词",
+            "pronunciation": "发音"
+        },
+        "correctionClean": "这句没发现问题",
+        "correctionPending": "正在检查这句…",
+        "correctionBy": "纠错模型：{{backend}} · {{model}}",
         "difficultyTitle": "难度",
         "difficulty": {
             "basic": "入门",

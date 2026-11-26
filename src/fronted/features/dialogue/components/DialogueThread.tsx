@@ -3,8 +3,10 @@ import { useTranslation } from 'react-i18next';
 import { Loader2, Volume2 } from 'lucide-react';
 import type { UIMessage } from 'ai';
 
+import type { DialogueCorrection } from '@/common/contracts/dialogue';
 import { cn } from '@/fronted/lib/utils';
 import { getMessageText } from '../useDialogueChat';
+import CorrectionCard from './CorrectionCard';
 
 /**
  * 朗读只读英文部分：入门档的回复可能在英文后追加「（提示：……）」，
@@ -29,6 +31,8 @@ const toSpeakable = (text: string): string => {
  * @param props.messages 流式对话消息。
  * @param props.isBusy 是否正在生成。
  * @param props.onSpeak 朗读回调。
+ * @param props.corrections 按学习者发言顺序（从 0 开始）索引的纠错结果。
+ * @param props.pendingCorrectionIndex 正在纠错的学习者发言序号。
  */
 export default function DialogueThread({
     sceneOpening,
@@ -36,12 +40,16 @@ export default function DialogueThread({
     messages,
     isBusy,
     onSpeak,
+    corrections,
+    pendingCorrectionIndex,
 }: {
     sceneOpening: string;
     openingHint: string;
     messages: UIMessage[];
     isBusy: boolean;
     onSpeak: (text: string) => void;
+    corrections: Record<number, DialogueCorrection>;
+    pendingCorrectionIndex: number | null;
 }) {
     const { t } = useTranslation('pages');
     const bottomRef = useRef<HTMLDivElement | null>(null);
@@ -49,6 +57,14 @@ export default function DialogueThread({
     useEffect(() => {
         bottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
     }, [messages, isBusy]);
+
+    /** 学习者的第几条发言（从 0 开始）；纠错结果按这个序号对齐。 */
+    const userIndexById = messages.reduce((acc, message) => {
+        if (message.role === 'user') {
+            acc.set(message.id, acc.size);
+        }
+        return acc;
+    }, new Map<string, number>());
 
     return (
         <div className="flex flex-col gap-3">
@@ -78,6 +94,7 @@ export default function DialogueThread({
                     return null;
                 }
                 const isUser = message.role === 'user';
+                const userIndex = isUser ? userIndexById.get(message.id) ?? -1 : -1;
                 return (
                     <div
                         key={message.id}
@@ -106,6 +123,12 @@ export default function DialogueThread({
                                 </button>
                             )}
                         </div>
+                        {isUser && (
+                            <CorrectionCard
+                                correction={corrections[userIndex] ?? null}
+                                pending={pendingCorrectionIndex === userIndex}
+                            />
+                        )}
                     </div>
                 );
             })}

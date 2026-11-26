@@ -4,6 +4,7 @@ import toast from 'react-hot-toast';
 import { CheckCheck, Loader2 } from 'lucide-react';
 
 import type {
+    DialogueCorrection,
     DialogueReview,
     DialogueScene,
     DialogueScript,
@@ -51,16 +52,47 @@ export default function DialogueSessionView({
     const writeChainRef = useRef<Promise<void>>(Promise.resolve());
     /** 是否有回合写入失败；复盘前提示学习者记录可能不完整。 */
     const writeErrorRef = useRef(false);
+    /** 按学习者发言顺序（从 0 开始）索引的纠错结果。 */
+    const [corrections, setCorrections] = useState<Record<number, DialogueCorrection>>({});
+    /** 正在纠错的学习者发言序号；用于在对应句子下方显示"检查中"。 */
+    const [pendingCorrectionIndex, setPendingCorrectionIndex] = useState<number | null>(null);
+    const userTurnIndexRef = useRef(0);
+    /** 等助手回复结束后再纠错：本地模型是串行的，同时发两个请求会拖慢对话。 */
+    const pendingCorrectionRef = useRef<{
+        turnId: number;
+        index: number;
+        lowConfidenceWords: string[];
+    } | null>(null);
 
-    const enqueueWrite = (task: () => Promise<unknown>): Promise<void> => {
-        const next = writeChainRef.current
-            .then(task, task)
-            .then(() => undefined);
-        writeChainRef.current = next.catch((error) => {
+    const enqueueWrite = <T, >(task: () => Promise<T>): Promise<T> => {
+        const next = writeChainRef.current.then(task, task);
+        writeChainRef.current = next.then(() => undefined).catch((error) => {
             writeErrorRef.current = true;
             logger.error('对话回合落库失败', { error });
         });
         return next;
+    };
+
+    /**
+     * 触发一条学习者发言的逐句纠错。
+     * @param task 回合、发言序号与识别置信度低的词。
+     */
+    const runCorrection = (task: { turnId: number; index: number; lowConfidenceWords: string[] }): void => {
+        setPendingCorrectionIndex(task.index);
+        dialogueApi.correctTurn({
+            sessionId: session.id,
+            turnId: task.turnId,
+            lowConfidenceWords: task.lowConfidenceWords,
+        })
+            .then((result) => {
+                setCorrections((previous) => ({ ...previous, [task.index]: result.correction }));
+            })
+            .catch((error) => {
+                logger.error('逐句纠错失败', { error, turnId: task.turnId });
+            })
+            .finally(() => {
+                setPendingCorrectionIndex((current) => (current === task.index ? null : current));
+            });
     };
 
     const chat = useDialogueChat({
@@ -73,21 +105,35 @@ export default function DialogueSessionView({
             })).catch((error) => {
                 logger.error('助手消息落库失败', { error });
             });
+            const pending = pendingCorrectionRef.current;
+            if (pending) {
+                pendingCorrectionRef.current = null;
+                runCorrection(pending);
+            }
         },
     });
 
-    const handleSend = async (text: string): Promise<void> => {
+    const handleSend = async (text: string, meta?: { lowConfidenceWords: string[] }): Promise<void> => {
+        let turnId: number;
         try {
-            await enqueueWrite(() => dialogueApi.appendTurn({
+            const saved = await enqueueWrite(() => dialogueApi.appendTurn({
                 sessionId: session.id,
                 role: 'user',
                 content: text,
             }));
+            turnId = saved.turn.id;
         } catch (error) {
             logger.error('学习者消息落库失败', { error });
             toast.error(t('dialogue.turnSaveFailed'));
             return;
         }
+        // 记下待纠错的回合，等助手回复结束后统一发起
+        pendingCorrectionRef.current = {
+            turnId,
+            index: userTurnIndexRef.current,
+            lowConfidenceWords: meta?.lowConfidenceWords ?? [],
+        };
+        userTurnIndexRef.current += 1;
         await chat.send(text);
     };
 
@@ -123,6 +169,8 @@ export default function DialogueSessionView({
                     messages={chat.messages}
                     isBusy={chat.isBusy}
                     onSpeak={onSpeak}
+                    corrections={corrections}
+                    pendingCorrectionIndex={pendingCorrectionIndex}
                 />
 
                 {chat.error && (
@@ -136,8 +184,8 @@ export default function DialogueSessionView({
                         disabled={chat.isBusy || finishing}
                         busy={chat.isBusy}
                         onStop={chat.stop}
-                        onSend={(text) => {
-                            void handleSend(text);
+                        onSend={(text, meta) => {
+                            void handleSend(text, meta);
                         }}
                     />
                 </div>

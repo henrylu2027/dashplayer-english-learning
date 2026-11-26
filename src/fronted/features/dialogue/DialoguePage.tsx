@@ -28,6 +28,7 @@ import { getRendererLogger } from '@/fronted/log/simple-logger';
 import { cn } from '@/fronted/lib/utils';
 import { dialogueApi } from './dialogueApi';
 import ClipTranscriptRail from './components/ClipTranscriptRail';
+import CorrectionCard from './components/CorrectionCard';
 import DialogueSessionView from './components/DialogueSessionView';
 import HistoryList from './components/HistoryList';
 import ReviewPanel from './components/ReviewPanel';
@@ -382,6 +383,11 @@ export default function DialoguePage() {
                                 >
                                     {turn.content}
                                 </div>
+                                {turn.role === 'user' && turn.correction && (
+                                    <div className="flex w-full justify-end">
+                                        <CorrectionCard correction={turn.correction} pending={false} />
+                                    </div>
+                                )}
                             </div>
                         ))}
                     </section>

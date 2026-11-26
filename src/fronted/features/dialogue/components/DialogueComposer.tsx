@@ -30,7 +30,8 @@ const formatElapsed = (seconds: number): string => {
  * 草稿内容不会被当成评分依据，避免把识别错误算成学习者的错误。
  *
  * @param props.disabled 生成期间禁用输入。
- * @param props.onSend 发送文本。
+ * @param props.onSend 发送文本；来自录音且未改动时带上识别置信度低的词。
+ * @param props.onStop 停止生成。
  */
 export default function DialogueComposer({
     disabled,
@@ -40,13 +41,15 @@ export default function DialogueComposer({
 }: {
     disabled: boolean;
     busy: boolean;
-    onSend: (text: string) => void;
+    onSend: (text: string, meta?: { lowConfidenceWords: string[] }) => void;
     onStop: () => void;
 }) {
     const { t } = useTranslation('pages');
     const [input, setInput] = useState('');
     const [processing, setProcessing] = useState(false);
     const [error, setError] = useState<string | null>(null);
+    /** 最近一次识别结果；学习者没改动时才把低置信度词带进纠错。 */
+    const [recognition, setRecognition] = useState<{ text: string; lowConfidenceWords: string[] } | null>(null);
 
     const handleAudio = async (blob: Blob): Promise<void> => {
         if (blob.size === 0) {
@@ -67,6 +70,7 @@ export default function DialogueComposer({
                 return;
             }
             setInput((previous) => (previous.trim().length > 0 ? `${previous.trim()} ${recognized}` : recognized));
+            setRecognition({ text: recognized, lowConfidenceWords: result.lowConfidenceWords });
         } catch (transcribeError) {
             logger.error('对话语音识别失败', { error: transcribeError });
             setError(transcribeError instanceof Error ? transcribeError.message : t('dialogue.recognizeFailed'));
@@ -84,9 +88,15 @@ export default function DialogueComposer({
         if (!text || inputBlocked) {
             return;
         }
+        // 只有文本与识别结果完全一致时才认为"这是朗读输入"；
+        // 改过字就不能再把识别置信度当成发音线索
+        const meta = recognition && recognition.text === text && recognition.lowConfidenceWords.length > 0
+            ? { lowConfidenceWords: recognition.lowConfidenceWords }
+            : undefined;
         setInput('');
         setError(null);
-        onSend(text);
+        setRecognition(null);
+        onSend(text, meta);
     };
 
     const handleMicClick = (): void => {

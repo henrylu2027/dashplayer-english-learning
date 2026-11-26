@@ -2,6 +2,8 @@ import type {
     DialogueAppendTurnRequest,
     DialogueAppendTurnResult,
     DialogueAvailability,
+    DialogueCorrectTurnRequest,
+    DialogueCorrectTurnResult,
     DialogueCreateRequest,
     DialogueCreateResult,
     DialogueDetail,
@@ -33,6 +35,10 @@ export const dialogueApi = {
     /** 追加一条已完成的消息。 */
     appendTurn: (params: DialogueAppendTurnRequest): Promise<DialogueAppendTurnResult> =>
         backendClient.call('dialogue/append-turn', params),
+
+    /** 对一条学习者发言做逐句纠错。 */
+    correctTurn: (params: DialogueCorrectTurnRequest): Promise<DialogueCorrectTurnResult> =>
+        backendClient.call('dialogue/correct-turn', params),
 
     /** 结束对话并生成复盘。 */
     finish: (params: DialogueFinishRequest): Promise<DialogueFinishResult> =>

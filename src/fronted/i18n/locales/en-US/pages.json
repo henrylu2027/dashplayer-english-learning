@@ -405,6 +405,14 @@
         "roleNameHint": "Use the names from the video; the AI plays that character",
         "learnerRole": "You play",
         "you": "You",
+        "correctionKind": {
+            "grammar": "Grammar",
+            "wording": "Wording",
+            "pronunciation": "Pronunciation"
+        },
+        "correctionClean": "No issues found in this line",
+        "correctionPending": "Checking this line…",
+        "correctionBy": "Checked by {{backend}} · {{model}}",
         "difficultyTitle": "Difficulty",
         "difficulty": {
             "basic": "Starter",
