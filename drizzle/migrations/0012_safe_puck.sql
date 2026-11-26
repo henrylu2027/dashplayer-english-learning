@@ -1,0 +1,1 @@
+ALTER TABLE `dp_dialogue_turn` ADD `correction_json` text;

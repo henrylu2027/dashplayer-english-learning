@@ -16,6 +16,7 @@ import {
     DIALOGUE_DIFFICULTIES,
     DIALOGUE_ROLES,
     DIALOGUE_SPEAKERS,
+    dialogueCorrectionDraftSchema,
     dialogueReviewDraftSchema,
     dialogueSceneSchema,
     type DialogueAvailability,
@@ -39,10 +40,15 @@ import {
     type DialogueTurnVO,
     type DialogueAppendTurnRequest,
     type DialogueAppendTurnResult,
+    type DialogueCorrectTurnRequest,
+    type DialogueCorrectTurnResult,
+    type DialogueCorrection,
+    type DialogueCorrectionDraft,
 } from '@/common/contracts/dialogue';
 import { normalizeShadowingSource } from '@/backend/services/shadowing/ShadowingSource';
 import { normalizeWord, tokenizeForScoring } from '@/common/utils/wordTokens';
 import {
+    buildCorrectionPrompt,
     buildDialogueSystemPrompt,
     buildReviewPrompt,
     buildScenePrompt,
@@ -73,6 +79,15 @@ export default interface DialogueService {
      * @throws 录音为空/过大或识别失败时抛出。
      */
     transcribe(request: DialogueTranscribeRequest): Promise<DialogueTranscribeResult>;
+
+    /**
+     * 对一条学习者发言做逐句纠错，并把结果写回该回合。
+     *
+     * @param request 会话、回合与识别置信度低的词。
+     * @returns 已落库的纠错结果。
+     * @throws 回合不属于该会话、不是学习者发言或生成失败时抛出。
+     */
+    correctTurn(request: DialogueCorrectTurnRequest): Promise<DialogueCorrectTurnResult>;
 
     /**
      * 追加一条已完成的消息。
@@ -124,6 +139,20 @@ const MAX_SCRIPT_LINES = 16;
 /** 说话人为空时使用的默认显示名。 */
 const DEFAULT_ROLE_A_NAME = '说话人 A';
 const DEFAULT_ROLE_B_NAME = '说话人 B';
+
+/**
+ * 低于该概率的词视为"识别没把握"。
+ *
+ * 依据：实测正常朗读的词概率普遍在 0.9 以上，低于 0.6 的基本是听不清、
+ * 环境噪音或生僻词。它只能提示"可能没读清"，不能判定发音对错。
+ */
+const LOW_CONFIDENCE_THRESHOLD = 0.6;
+
+/** 一次最多提示几个低置信度词，避免整句标红。 */
+const MAX_LOW_CONFIDENCE_WORDS = 6;
+
+/** 单轮纠错最多几条意见，与 schema 上限一致。 */
+const MAX_CORRECTION_ITEMS = 4;
 
 /**
  * 把文本归一化为用于目标表达匹配的字符串。
@@ -399,12 +428,54 @@ export class DialogueServiceImpl implements DialogueService {
             mimeType: request.mimeType,
             job,
         });
+        // 只提示识别没把握的词；这是"可能没读清"，不是发音评分
+        const lowConfidenceWords = speech.words
+            .filter((word) => word.probability < LOW_CONFIDENCE_THRESHOLD)
+            .slice(0, MAX_LOW_CONFIDENCE_WORDS)
+            .map((word) => word.text);
         this.logger.info('dialogue speech transcribed', {
             job,
             textLength: speech.text.length,
             durationSec: Math.round(speech.durationSec * 100) / 100,
+            lowConfidenceCount: lowConfidenceWords.length,
         });
-        return { text: speech.text, durationSec: speech.durationSec };
+        return {
+            text: speech.text,
+            durationSec: speech.durationSec,
+            lowConfidenceWords,
+        };
+    }
+
+    public async correctTurn(request: DialogueCorrectTurnRequest): Promise<DialogueCorrectTurnResult> {
+        if (!Number.isInteger(request.sessionId) || !Number.isInteger(request.turnId)) {
+            throw new Error('纠错请求缺少会话或回合');
+        }
+        const record = await this.dialogueRepository.getSession(request.sessionId);
+        const turns = await this.dialogueRepository.listTurns(request.sessionId);
+        const target = turns.find((turn) => turn.id === request.turnId);
+        if (!target) {
+            throw new Error('这条发言不属于当前对话');
+        }
+        if (target.role !== 'user') {
+            throw new Error('只能对学习者的发言纠错');
+        }
+        const lowConfidenceWords = (request.lowConfidenceWords ?? [])
+            .map((word) => word.trim())
+            .filter((word) => word.length > 0)
+            .slice(0, MAX_LOW_CONFIDENCE_WORDS);
+        const correction = await this.generateCorrection({
+            text: target.content,
+            lowConfidenceWords,
+            backend: record.session.backend,
+        });
+        const saved = await this.dialogueRepository.updateTurnCorrection(request.turnId, correction);
+        this.logger.info('dialogue turn corrected', {
+            sessionId: request.sessionId,
+            turnId: request.turnId,
+            itemCount: correction.items.length,
+            lowConfidenceCount: lowConfidenceWords.length,
+        });
+        return { turnId: saved.id, correction: saved.correction ?? correction };
     }
 
     public async appendTurn(request: DialogueAppendTurnRequest): Promise<DialogueAppendTurnResult> {
@@ -578,6 +649,100 @@ export class DialogueServiceImpl implements DialogueService {
         return {
             draft: result.object,
             reviewer: { backend: 'cloud', model: routed.modelId },
+        };
+    }
+
+    /**
+     * 生成逐句纠错。
+     *
+     * @param params 学习者原句、识别置信度低的词与后端。
+     * @returns 通过 schema 校验、并已按"诚实评分"规则过滤的纠错结果。
+     */
+    private async generateCorrection(params: {
+        text: string;
+        lowConfidenceWords: string[];
+        backend: DialogueModelBackend;
+    }): Promise<DialogueCorrection> {
+        const prompt = buildCorrectionPrompt(params);
+        if (params.backend === 'local') {
+            const modelId = await this.localAiService.getActiveModelId();
+            const raw = await this.localAiService.generate(
+                prompt,
+                z.toJSONSchema(dialogueCorrectionDraftSchema),
+                modelId,
+            );
+            return this.toCorrection(
+                dialogueCorrectionDraftSchema.parse(raw),
+                params,
+                { backend: 'local', model: modelId },
+            );
+        }
+        const model = this.aiProviderService.getModel('sentenceLearning');
+        if (!model) {
+            throw new Error(CLOUD_AI_NOT_CONFIGURED_MESSAGE);
+        }
+        const routed = this.modelRoutingService.resolveOpenAiModel('sentenceLearning');
+        if (!routed) {
+            throw new Error(CLOUD_AI_NOT_CONFIGURED_MESSAGE);
+        }
+        const result = await generateObject({ model, schema: dialogueCorrectionDraftSchema, prompt });
+        return this.toCorrection(result.object, params, { backend: 'cloud', model: routed.modelId });
+    }
+
+    /**
+     * 过滤纠错意见，守住"只说能验证的话"。
+     *
+     * 规则：原句片段必须真的出现在学习者原句里；better 不能与原句相同；
+     * 发音类只能落在识别置信度低的词上——模型自作主张补的发音意见一律丢弃。
+     *
+     * @param draft 模型返回的草稿。
+     * @param params 原句与低置信度词。
+     * @param reviewer 点评模型来源。
+     * @returns 可展示的纠错结果。
+     */
+    private toCorrection(
+        draft: DialogueCorrectionDraft,
+        params: { text: string; lowConfidenceWords: string[] },
+        reviewer: DialogueCorrection['reviewer'],
+    ): DialogueCorrection {
+        const sentence = normalizePhrase(params.text);
+        const lowConfidence = params.lowConfidenceWords.map(normalizePhrase).filter((word) => word.length > 0);
+        const seen = new Set<string>();
+        const items = draft.items.filter((item) => {
+            const original = normalizePhrase(item.original);
+            const better = normalizePhrase(item.better);
+            if (original.length === 0 || original === better) {
+                return false;
+            }
+            // 原句片段必须能在学习者原句里找到，避免模型引用别的句子
+            if (!sentence.includes(original)) {
+                return false;
+            }
+            if (item.kind === 'pronunciation') {
+                // 发音类必须落在低置信度词上，否则就是编的
+                const grounded = lowConfidence.some((word) => word.includes(original) || original.includes(word));
+                if (!grounded) {
+                    return false;
+                }
+            }
+            const key = `${item.kind}:${original}`;
+            if (seen.has(key)) {
+                return false;
+            }
+            seen.add(key);
+            return true;
+        }).slice(0, MAX_CORRECTION_ITEMS);
+        if (items.length !== draft.items.length) {
+            this.logger.info('dialogue correction filtered', {
+                total: draft.items.length,
+                kept: items.length,
+                lowConfidenceCount: lowConfidence.length,
+            });
+        }
+        return {
+            corrected: draft.corrected.trim() || params.text,
+            items,
+            reviewer,
         };
     }
 

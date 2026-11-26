@@ -8,6 +8,12 @@ export interface SpeechRecognitionToken {
     start: number;
     /** 子词结束时间，单位为秒；引擎只提供开始时间时缺省。 */
     end?: number;
+    /**
+     * 引擎对该子词给出的概率（0~1）；引擎不输出时缺省。
+     *
+     * 只用于提示"识别没把握"，不能据此判断发音对错。
+     */
+    probability?: number;
 }
 
 /**

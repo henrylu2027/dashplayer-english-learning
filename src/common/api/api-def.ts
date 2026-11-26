@@ -47,6 +47,8 @@ import type {
     DialogueAppendTurnRequest,
     DialogueAppendTurnResult,
     DialogueAvailability,
+    DialogueCorrectTurnRequest,
+    DialogueCorrectTurnResult,
     DialogueCreateRequest,
     DialogueCreateResult,
     DialogueDetail,
@@ -548,6 +550,7 @@ interface DialogueDef {
     'dialogue/create': { params: DialogueCreateRequest, return: DialogueCreateResult };
     'dialogue/transcribe': { params: DialogueTranscribeRequest, return: DialogueTranscribeResult };
     'dialogue/append-turn': { params: DialogueAppendTurnRequest, return: DialogueAppendTurnResult };
+    'dialogue/correct-turn': { params: DialogueCorrectTurnRequest, return: DialogueCorrectTurnResult };
     'dialogue/finish': { params: DialogueFinishRequest, return: DialogueFinishResult };
     'dialogue/list': { params: DialogueListQuery, return: DialogueSessionSummary[] };
     'dialogue/detail': { params: { sessionId: number }, return: DialogueDetail };

@@ -128,6 +128,8 @@ export function parseWhisperCppOutput(stdout: string, stderr: string): WhisperCp
     }
     const tokens: SpeechRecognitionToken[] = [];
     const tokenPattern = /^\s*\[\s*\d+\]\s+.*?\bt0=\s*(-?\d+)\s+t1=\s*(-?\d+)\s+word_start=(?:true|false)\s+"(.*)"$/;
+    // token 行里带 `p=0.9870` 的概率字段；老版本引擎不输出时缺省，不视为错误
+    const probabilityPattern = /\bp=\s*([0-9]*\.?[0-9]+)/;
     for (const line of stderr.split(/\r?\n/)) {
         const match = tokenPattern.exec(line);
         if (!match) continue;
@@ -142,7 +144,14 @@ export function parseWhisperCppOutput(stdout: string, stderr: string): WhisperCp
             // 它不携带词文本，只占位时间轴；直接跳过，不能视为数据损坏。
             continue;
         }
-        tokens.push({ text: tokenText, start: startMs / TOKEN_TIME_UNIT_MS, end: endMs / TOKEN_TIME_UNIT_MS });
+        const probabilityMatch = probabilityPattern.exec(line);
+        const probability = probabilityMatch ? Number(probabilityMatch[1]) : undefined;
+        tokens.push({
+            text: tokenText,
+            start: startMs / TOKEN_TIME_UNIT_MS,
+            end: endMs / TOKEN_TIME_UNIT_MS,
+            ...(probability !== undefined && Number.isFinite(probability) ? { probability } : {}),
+        });
     }
     if (tokens.length === 0) {
         throw new Error(`whisper.cpp 未返回 token 时间轴：${stderr.slice(-2000)}`);

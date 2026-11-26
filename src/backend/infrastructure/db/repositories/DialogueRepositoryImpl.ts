@@ -14,9 +14,11 @@ import {
     DIALOGUE_BACKENDS,
     DIALOGUE_DIFFICULTIES,
     DIALOGUE_ROLES,
+    dialogueCorrectionSchema,
     dialogueReviewSchema,
     dialogueSceneSchema,
     dialogueScriptSchema,
+    type DialogueCorrection,
     type DialogueDifficulty,
     type DialogueModelBackend,
     type DialogueReview,
@@ -115,6 +117,17 @@ function mapSession(row: DialogueSessionRow, turnCount: number): DialogueSession
 }
 
 /**
+ * 解析逐句纠错 JSON；没有纠错时为 null。
+ * @param json 数据库中的纠错字段。
+ */
+function parseCorrection(json: string | null): DialogueCorrection | null {
+    if (!json) {
+        return null;
+    }
+    return dialogueCorrectionSchema.parse(JSON.parse(json));
+}
+
+/**
  * 映射回合行。
  * @param row 数据库行。
  */
@@ -124,6 +137,7 @@ function mapTurn(row: DialogueTurnRow): DialogueTurnVO {
         role: parseRole(row.role),
         content: row.content,
         cardId: row.card_id,
+        correction: parseCorrection(row.correction_json),
         createdAt: row.created_at,
     };
 }
@@ -238,6 +252,30 @@ export default class DialogueRepositoryImpl implements DialogueRepository {
             throw new Error(`对话回合写入后无法读取: ${id}`);
         }
         return mapTurn(row);
+    }
+
+    public async getTurn(turnId: number): Promise<DialogueTurnVO> {
+        const row = db
+            .select()
+            .from(dialogueTurn)
+            .where(eq(dialogueTurn.id, turnId))
+            .get();
+        if (!row) {
+            throw new Error(`对话回合不存在: ${turnId}`);
+        }
+        return mapTurn(row);
+    }
+
+    public async updateTurnCorrection(turnId: number, correction: DialogueCorrection): Promise<DialogueTurnVO> {
+        const updated = db
+            .update(dialogueTurn)
+            .set({ correction_json: JSON.stringify(correction) })
+            .where(eq(dialogueTurn.id, turnId))
+            .run();
+        if (updated.changes === 0) {
+            throw new Error(`对话回合不存在: ${turnId}`);
+        }
+        return this.getTurn(turnId);
     }
 
     public async listTurns(sessionId: number): Promise<DialogueTurnVO[]> {

@@ -18,6 +18,45 @@ export interface RecordedSpeechResult {
     text: string;
     /** 转码后音频时长，单位秒。 */
     durationSec: number;
+    /**
+     * 按词聚合后的识别结果。
+     *
+     * `probability` 取该词所有子词里最低的一个；引擎不输出概率时按 1 处理。
+     * 只用于提示"识别没把握"，不能据此判断发音对错。
+     */
+    words: Array<{ text: string; probability: number }>;
+}
+
+/**
+ * 把子词时间轴聚合成词。
+ *
+ * 说明：引擎按子词输出，词边界由文本是否以空格开头决定（`▁` 已在上游替换成空格）。
+ *
+ * @param tokens 子词时间轴。
+ * @returns 词列表，每个词的概率取子词最低值。
+ */
+export function groupTokensIntoWords(
+    tokens: Array<{ text: string; probability?: number }>,
+): Array<{ text: string; probability: number }> {
+    const words: Array<{ text: string; probability: number }> = [];
+    for (const token of tokens) {
+        const piece = token.text.trim();
+        if (!piece) {
+            continue;
+        }
+        const probability = typeof token.probability === 'number' && Number.isFinite(token.probability)
+            ? token.probability
+            : 1;
+        const startsNewWord = words.length === 0 || token.text.startsWith(' ');
+        if (startsNewWord) {
+            words.push({ text: piece, probability });
+            continue;
+        }
+        const last = words[words.length - 1];
+        last.text += piece;
+        last.probability = Math.min(last.probability, probability);
+    }
+    return words;
 }
 
 /**
@@ -122,7 +161,11 @@ export class RecordedSpeechServiceImpl implements RecordedSpeechService {
                 () => gateway.transcribe({ audioPath: wavFile, modelsRoot, job: params.job }),
                 { skipOrderCheck: true },
             );
-            return { text: recognition.text.trim(), durationSec };
+            return {
+                text: recognition.text.trim(),
+                durationSec,
+                words: groupTokensIntoWords(recognition.tokens ?? []),
+            };
         } finally {
             try {
                 await this.fileSystemGateway.removeDirectoryIfExists(tempFolder);

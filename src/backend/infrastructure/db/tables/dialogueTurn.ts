@@ -13,6 +13,8 @@ export const dialogueTurn = sqliteTable('dp_dialogue_turn', {
     role: text('role').notNull(),
     content: text('content').notNull(),
     card_id: integer('card_id', { mode: 'number' }),
+    /** 逐句纠错 JSON；未请求或助手的发言为空。 */
+    correction_json: text('correction_json'),
     created_at: integer('created_at', { mode: 'number' }).notNull(),
 }, (table) => ({
     sessionIdx: index('dp_dialogue_turn_session_idx').on(table.session_id, table.created_at),

@@ -1,4 +1,5 @@
 import type {
+    DialogueCorrection,
     DialogueDifficulty,
     DialogueModelBackend,
     DialogueReview,
@@ -106,6 +107,21 @@ export default interface DialogueRepository {
      * @returns 落库后的回合。
      */
     appendTurn(params: AppendDialogueTurnParams): Promise<DialogueTurnVO>;
+
+    /**
+     * 读取单个回合；不存在时显式报错。
+     * @param turnId 回合主键。
+     * @returns 回合详情。
+     */
+    getTurn(turnId: number): Promise<DialogueTurnVO>;
+
+    /**
+     * 写入某一回合的逐句纠错。
+     * @param turnId 回合主键。
+     * @param correction 纠错结果。
+     * @returns 更新后的回合。
+     */
+    updateTurnCorrection(turnId: number, correction: DialogueCorrection): Promise<DialogueTurnVO>;
 
     /**
      * 按时间顺序读取一个会话的全部回合。

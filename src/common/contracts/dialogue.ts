@@ -174,6 +174,8 @@ export interface DialogueTurnVO {
     content: string;
     /** 该回合被加入复习后的卡片 ID；未加入时为 null。 */
     cardId: number | null;
+    /** 该回合的逐句纠错；未请求或助手发言时为 null。 */
+    correction: DialogueCorrection | null;
     /** 记录时间，epoch 毫秒。 */
     createdAt: number;
 }
@@ -255,6 +257,91 @@ export const dialogueScriptSchema = z.object({
 });
 
 /**
+ * 逐句纠错的类型。
+ *
+ * 说明：发音一类只在识别置信度确实偏低时才出现——本地识别引擎给出每个词的
+ * 概率，没有把握的词才提示"可能没读清"，不做音素、重音、语调评分。
+ */
+export const DIALOGUE_CORRECTION_KINDS = ['grammar', 'wording', 'pronunciation'] as const;
+
+/** 纠错类型。 */
+export type DialogueCorrectionKind = (typeof DIALOGUE_CORRECTION_KINDS)[number];
+
+/**
+ * 一条纠错意见。
+ */
+export const dialogueCorrectionItemSchema = z.object({
+    /** 纠错类型。 */
+    kind: z.enum(DIALOGUE_CORRECTION_KINDS),
+    /** 学习者原话片段，必须照抄。 */
+    original: z.string().min(1),
+    /** 更自然或更正确的写法；发音类填建议重读的词。 */
+    better: z.string().min(1),
+    /** 一句中文说明。 */
+    whyZh: z.string().min(1),
+});
+
+/** 纠错意见类型。 */
+export type DialogueCorrectionItem = z.infer<typeof dialogueCorrectionItemSchema>;
+
+/**
+ * 纠错的结构化生成契约：只包含模型能给出的部分。
+ */
+export const dialogueCorrectionDraftSchema = z.object({
+    /** 整句改写；无需修改时与原句相同。 */
+    corrected: z.string().min(1),
+    /** 逐条意见。 */
+    items: z.array(dialogueCorrectionItemSchema).max(4),
+});
+
+/** 纠错草稿类型。 */
+export type DialogueCorrectionDraft = z.infer<typeof dialogueCorrectionDraftSchema>;
+
+/**
+ * 一句学习者发言的纠错结果。
+ */
+export const dialogueCorrectionSchema = z.object({
+    /** 整句改写；无需修改时与原句相同。 */
+    corrected: z.string().min(1),
+    /** 逐条意见；没有问题时为空数组。 */
+    items: z.array(dialogueCorrectionItemSchema).max(4),
+    /** 点评所用模型；界面必须如实标注。 */
+    reviewer: z.object({
+        backend: z.enum(DIALOGUE_BACKENDS),
+        model: z.string(),
+    }),
+});
+
+/** 纠错结果类型。 */
+export type DialogueCorrection = z.infer<typeof dialogueCorrectionSchema>;
+
+/**
+ * 逐句纠错请求。
+ */
+export interface DialogueCorrectTurnRequest {
+    /** 对话数据库主键。 */
+    sessionId: number;
+    /** 需要纠错的回合（学习者发言）。 */
+    turnId: number;
+    /**
+     * 语音识别置信度低的词。
+     *
+     * 只有输入来自录音时才有；打字输入时应为空数组，模型不得凭空判定发音问题。
+     */
+    lowConfidenceWords?: string[];
+}
+
+/**
+ * 逐句纠错结果。
+ */
+export interface DialogueCorrectTurnResult {
+    /** 回合主键。 */
+    turnId: number;
+    /** 纠错结果；已落库。 */
+    correction: DialogueCorrection;
+}
+
+/**
  * 学习者练过的一句台词。
  *
  * 来源是当前视频的跟读记录或复习卡：这些句子用户已经反复听过、读过，
@@ -328,6 +415,13 @@ export interface DialogueTranscribeResult {
     text: string;
     /** 音频时长，单位秒。 */
     durationSec: number;
+    /**
+     * 识别置信度低的词。
+     *
+     * 来自识别引擎对每个词给出的概率；只提示"可能没读清"，不判定发音对错。
+     * 打字输入没有这项信息，为空数组。
+     */
+    lowConfidenceWords: string[];
 }
 
 /**
