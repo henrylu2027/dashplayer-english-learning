@@ -5,7 +5,7 @@ import logoLight from '../../../../assets/logo-light.png';
 import logoDark from '../../../../assets/logo-dark.png';
 import useFile from '@/fronted/features/file-browser/fileStore';
 import useSetting from '@/fronted/features/settings/settingsStore';
-import { AudioLines, BookOpen, Captions, LayoutDashboard, MessagesSquare, Mic, PencilLine, Repeat, Rotate3D, Settings, SquareSplitHorizontal, Star, Video, Volume2 } from 'lucide-react';
+import { AudioLines, BookOpen, Captions, LayoutDashboard, MessagesSquare, PencilLine, Repeat, Rotate3D, Settings, SquareSplitHorizontal, Star, Video, Volume2 } from 'lucide-react';
 import { useTranslation as useI18nTranslation } from 'react-i18next';
 
 export interface SideBarProps {
@@ -79,12 +79,8 @@ const SideBar = ({ compact }: SideBarProps) => {
             </div>
             <div className={cn('basis-3/4 flex flex-col p-3 gap-1')}>
                 {/* {item('Home', '/home', 'home', <HiOutlineHome />)} */}
-                {item(
-                    t('dashboard'),
-                    '/dashboard',
-                    'dashboard',
-                    <LayoutDashboard />
-                )}
+                {/* 顺序即学习主线：听素材 → 模仿跟读 → 听写复述 → 情景对话 → 生词 → 复习；
+                    之后是素材工具，最后放学习台与设置 */}
                 {item(
                     t('playbackLab'),
                     `/player/${videoId}?sideBarAnimation=false`,
@@ -92,22 +88,10 @@ const SideBar = ({ compact }: SideBarProps) => {
                     <Video />
                 )}
                 {item(
-                    t('shadowing'),
-                    '/shadowing',
-                    'shadowing',
-                    <Mic />
-                )}
-                {item(
                     t('originalShadowing'),
                     '/original',
                     'original',
                     <Volume2 />
-                )}
-                {item(
-                    t('reviewPlan'),
-                    '/review',
-                    'review',
-                    <Repeat />
                 )}
                 {item(
                     t('practice'),
@@ -122,6 +106,18 @@ const SideBar = ({ compact }: SideBarProps) => {
                     <MessagesSquare />
                 )}
                 {item(
+                    t('vocabularyStudio'),
+                    '/vocabulary',
+                    'vocabulary',
+                    <BookOpen />
+                )}
+                {item(
+                    t('reviewPlan'),
+                    '/review',
+                    'review',
+                    <Repeat />
+                )}
+                {item(
                     t('savedMoments'),
                     '/favorite',
                     'favorite',
@@ -132,6 +128,12 @@ const SideBar = ({ compact }: SideBarProps) => {
                     '/transcript',
                     'transcript',
                     <Captions />
+                )}
+                {item(
+                    t('dubbingExport'),
+                    '/dubbing',
+                    'dubbing',
+                    <AudioLines />
                 )}
                 {item(
                     t('sentenceSplitter'),
@@ -146,16 +148,10 @@ const SideBar = ({ compact }: SideBarProps) => {
                     <Rotate3D />
                 )}
                 {item(
-                    t('vocabularyStudio'),
-                    '/vocabulary',
-                    'vocabulary',
-                    <BookOpen />
-                )}
-                {item(
-                    t('dubbingExport'),
-                    '/dubbing',
-                    'dubbing',
-                    <AudioLines />
+                    t('dashboard'),
+                    '/dashboard',
+                    'dashboard',
+                    <LayoutDashboard />
                 )}
                 {item(t('settingsCenter'), '/settings', 'settings', <Settings />)}
             </div>

@@ -18,7 +18,6 @@ import {
     Clock,
     LayoutDashboard,
     MessagesSquare,
-    Mic,
     PencilLine,
     PlayCircle,
     Repeat,
@@ -26,7 +25,8 @@ import {
     Settings,
     SquareSplitHorizontal,
     Star,
-    Video
+    Video,
+    Volume2
 } from 'lucide-react';
 import FolderSelector, { FolderSelectAction } from '@/fronted/features/file-browser/components/FolderSelector';
 import FileSelector, { FileAction } from '@/fronted/features/file-browser/components/FileSelector';
@@ -90,25 +90,25 @@ const HomePage = () => {
 
     /**
      * 首页导航与左侧栏（SideBar）保持完全一致的条目与顺序：
-     * 学习台 → 沉浸式播放 → 跟读打分 → 间隔复习 → 听写复述 → 场景对话 →
-     * 收藏片段 → 视频字幕生成 → 切分长视频 → 修复播放问题 → 词汇工坊 → 配音导出 → 设置中心。
+     * 沉浸式播放 → 原音跟读 → 听写复述 → 场景对话 → 词汇工坊 → 间隔复习 →
+     * 收藏片段 → 视频字幕生成 → 配音导出 → 切分长视频 → 修复播放问题 → 学习台 → 设置中心。
      * 这样用户在首页和播放页看到的是同一套入口，不会因为少一项而找不到路。
      */
     const lastVideoId = vps?.[0]?.id ?? '';
     const navItems = [
-        { title: t('dashboard'), path: '/dashboard', icon: LayoutDashboard },
         // 沉浸式播放依赖具体视频；没有观看记录时置灰并提示，而不是消失（条目数量要与侧栏一致）
         { title: t('playbackLab'), path: lastVideoId ? `/player/${lastVideoId}` : '', icon: Video },
-        { title: t('shadowing'), path: '/shadowing', icon: Mic },
-        { title: t('reviewPlan'), path: '/review', icon: Repeat },
+        { title: t('originalShadowing'), path: '/original', icon: Volume2 },
         { title: t('practice'), path: '/practice', icon: PencilLine },
         { title: t('dialogue'), path: '/dialogue', icon: MessagesSquare },
+        { title: t('vocabularyStudio'), path: '/vocabulary', icon: BookOpen },
+        { title: t('reviewPlan'), path: '/review', icon: Repeat },
         { title: t('savedMoments'), path: '/favorite', icon: Star },
         { title: t('subtitleWorkspace'), path: '/transcript', icon: Captions },
+        { title: t('dubbingExport'), path: '/dubbing', icon: AudioLines },
         { title: t('sentenceSplitter'), path: '/split', icon: SquareSplitHorizontal },
         { title: t('playbackRepair'), path: '/repair', icon: Rotate3D },
-        { title: t('vocabularyStudio'), path: '/vocabulary', icon: BookOpen },
-        { title: t('dubbingExport'), path: '/dubbing', icon: AudioLines },
+        { title: t('dashboard'), path: '/dashboard', icon: LayoutDashboard },
         { title: t('settingsCenter'), path: '/settings', icon: Settings },
     ];
 
