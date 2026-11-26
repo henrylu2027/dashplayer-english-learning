@@ -16,11 +16,13 @@ import {
     DIALOGUE_ROLES,
     dialogueReviewSchema,
     dialogueSceneSchema,
+    dialogueScriptSchema,
     type DialogueDifficulty,
     type DialogueModelBackend,
     type DialogueReview,
     type DialogueRole,
     type DialogueScene,
+    type DialogueScript,
     type DialogueSessionSummary,
     type DialogueTurnVO,
 } from '@/common/contracts/dialogue';
@@ -83,6 +85,17 @@ function parseReview(json: string): DialogueReview {
 }
 
 /**
+ * 解析剧本 JSON；旧版对话没有剧本字段，返回 null。
+ * @param json 数据库中的剧本字段。
+ */
+function parseScript(json: string | null): DialogueScript | null {
+    if (!json) {
+        return null;
+    }
+    return dialogueScriptSchema.parse(JSON.parse(json));
+}
+
+/**
  * 映射会话行为跨层摘要。
  * @param row 数据库行。
  * @param turnCount 已记录回合数。
@@ -133,6 +146,12 @@ export default class DialogueRepositoryImpl implements DialogueRepository {
                 anchor_text: params.anchorText,
                 title: params.scene.title,
                 scene_json: JSON.stringify(params.scene),
+                clip_start: params.script?.startIndex ?? null,
+                clip_end: params.script?.endIndex ?? null,
+                role_a_name: params.script?.roleAName ?? null,
+                role_b_name: params.script?.roleBName ?? null,
+                learner_role: params.script?.learnerRole ?? null,
+                script_json: params.script ? JSON.stringify(params.script) : null,
                 difficulty: params.difficulty,
                 backend: params.backend,
                 status: 'active',
@@ -154,6 +173,7 @@ export default class DialogueRepositoryImpl implements DialogueRepository {
         return {
             session: mapSession(row, 0),
             scene: params.scene,
+            script: params.script,
             review: null,
         };
     }
@@ -170,6 +190,7 @@ export default class DialogueRepositoryImpl implements DialogueRepository {
         return {
             session: mapSession(row, this.countTurns(id)),
             scene: parseScene(row.scene_json),
+            script: parseScript(row.script_json),
             review: row.review_json ? parseReview(row.review_json) : null,
         };
     }

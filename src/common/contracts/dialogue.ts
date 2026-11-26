@@ -189,6 +189,72 @@ export interface DialogueAvailability {
 }
 
 /**
+ * 剧本里的两个匿名说话人。
+ *
+ * 字幕文件没有「谁说的」这一信息，所以不做说话人识别，只用 A/B 两个匿名标签，
+ * 由学习者在设置卡里改成视频里的真实名字。
+ */
+export const DIALOGUE_SPEAKERS = ['a', 'b'] as const;
+
+/** 说话人标签类型。 */
+export type DialogueSpeaker = (typeof DIALOGUE_SPEAKERS)[number];
+
+/**
+ * 剧本中的一行台词。
+ */
+export interface DialogueScriptLine {
+    /** 字幕句序号，便于回溯原句。 */
+    index: number;
+    /** 英文原文，逐字取自字幕。 */
+    en: string;
+    /** 中文译文；字幕没有译文时省略，不补写。 */
+    zh?: string;
+    /** 这一行的说话人（按字幕顺序自动交替分配）。 */
+    speaker: DialogueSpeaker;
+}
+
+/**
+ * 从视频里截取的一段真实对话，作为角色扮演的剧本。
+ *
+ * 说明：场景不再由模型凭空设计，而是围绕这段真实台词展开；
+ * 剧本本身只做展示与提示词上下文，不对学习者逐句打分。
+ */
+export interface DialogueScript {
+    /** 视频标识。 */
+    videoKey: string;
+    /** 起始字幕句序号（含）。 */
+    startIndex: number;
+    /** 结束字幕句序号（含）。 */
+    endIndex: number;
+    /** 台词行，按字幕顺序排列。 */
+    lines: DialogueScriptLine[];
+    /** 说话人 A 的显示名。 */
+    roleAName: string;
+    /** 说话人 B 的显示名。 */
+    roleBName: string;
+    /** 学习者扮演哪一方。 */
+    learnerRole: DialogueSpeaker;
+}
+
+/**
+ * 剧本的运行时校验；数据库里读出来的 JSON 必须符合此结构。
+ */
+export const dialogueScriptSchema = z.object({
+    videoKey: z.string().min(1),
+    startIndex: z.number().int(),
+    endIndex: z.number().int(),
+    lines: z.array(z.object({
+        index: z.number().int(),
+        en: z.string().min(1),
+        zh: z.string().optional(),
+        speaker: z.enum(DIALOGUE_SPEAKERS),
+    })).min(1),
+    roleAName: z.string().min(1),
+    roleBName: z.string().min(1),
+    learnerRole: z.enum(DIALOGUE_SPEAKERS),
+});
+
+/**
  * 学习者练过的一句台词。
  *
  * 来源是当前视频的跟读记录或复习卡：这些句子用户已经反复听过、读过，
@@ -220,6 +286,12 @@ export interface DialogueCreateRequest {
     focusLines?: DialogueFocusLine[];
     /** 视频句来源；必须绑定视频与字幕，才能保留回放语境。 */
     source: ShadowingAttemptSource;
+    /**
+     * 从视频截取的真实台词，作为剧本。
+     *
+     * 传了就从这段真实对话出发；不传则退回按锚点句另编场景（旧行为）。
+     */
+    script?: DialogueScript;
     /** 难度。 */
     difficulty: DialogueDifficulty;
     /** 使用的模型后端。 */
@@ -234,6 +306,8 @@ export interface DialogueCreateResult {
     session: DialogueSessionSummary;
     /** 生成的场景卡。 */
     scene: DialogueScene;
+    /** 本次使用的剧本；旧版按锚点句生成时为 null。 */
+    script: DialogueScript | null;
 }
 
 /**
@@ -315,6 +389,8 @@ export interface DialogueDetail {
     session: DialogueSessionSummary;
     /** 场景卡。 */
     scene: DialogueScene;
+    /** 本次使用的剧本；旧版对话为 null。 */
+    script: DialogueScript | null;
     /** 全部回合，按时间顺序。 */
     turns: DialogueTurnVO[];
     /** 复盘；未结束时为 null。 */

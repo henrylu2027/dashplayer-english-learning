@@ -2,6 +2,7 @@ import type {
     DialogueDifficulty,
     DialogueFocusLine,
     DialogueScene,
+    DialogueScript,
     DialogueStats,
     DialogueTurnVO,
 } from '@/common/contracts/dialogue';
@@ -91,6 +92,78 @@ export const buildScenePrompt = (params: {
         '  "userRole": "学习者扮演的角色（中文描述）",',
         '  "targetExpressions": [{"en": "英文表达", "zh": "中文释义"}],',
         '  "openingLineEn": "AI 的开场白（英文）",',
+        '  "openingHintZh": "开场白的中文提示"',
+        '}',
+    ].join('\n');
+};
+
+/**
+ * 把剧本格式化为「角色名：台词」的多行文本。
+ *
+ * @param script 剧本。
+ * @returns 逐行台词；有译文时附在括号里。
+ */
+const formatScriptLines = (script: DialogueScript): string => script.lines
+    .map((line) => {
+        const name = line.speaker === 'a' ? script.roleAName : script.roleBName;
+        const zh = line.zh?.trim();
+        return zh ? `${name}：${line.en}（${zh}）` : `${name}：${line.en}`;
+    })
+    .join('\n');
+
+/**
+ * 构建「跟着原片演」的场景提示词。
+ *
+ * 说明：与 `buildScenePrompt` 的区别是场景不再由模型另编，而是围绕一段真实字幕展开；
+ * 角色名、目标表达、开场白都锁定到剧本内，避免模型改名或编台词。
+ *
+ * @param params 锚点台词、剧本与难度。
+ * @returns 交给结构化生成的单条提示词。
+ */
+export const buildScriptScenePrompt = (params: {
+    /** 锚定的视频台词。 */
+    anchorText: string;
+    /** 从视频截取的真实台词。 */
+    script: DialogueScript;
+    /** 难度。 */
+    difficulty: DialogueDifficulty;
+}): string => {
+    const { script } = params;
+    const aiName = script.learnerRole === 'a' ? script.roleBName : script.roleAName;
+    const learnerName = script.learnerRole === 'a' ? script.roleAName : script.roleBName;
+    return [
+        '你在为英语学习工具设计一个角色扮演场景。学习者要跟着一段真实视频对话演一遍。',
+        '',
+        '原片剧本（来自视频字幕，按播放顺序，逐字照抄）：',
+        formatScriptLines(script),
+        '',
+        '剧本里只有两个人：',
+        `- ${script.roleAName}（说话人 A）`,
+        `- ${script.roleBName}（说话人 B）`,
+        '',
+        `学习者扮演：${learnerName}`,
+        `你（AI）扮演：${aiName}`,
+        '',
+        `锚点台词：「${params.anchorText}」`,
+        `语言难度：${DIFFICULTY_LABEL[params.difficulty]}（${DIFFICULTY_GUIDE[params.difficulty]}）`,
+        '',
+        '# 设计要求',
+        '- 场景设定必须来自上面这段对话的情境，不要另编互不相关的情节。',
+        '- aiRole 填你扮演的角色，userRole 填学习者扮演的角色；两人都用剧本里给出的名字，不要改名、不要新增第三个角色。',
+        '- targetExpressions 从上面剧本里按顺序取 2~4 句：en 与原文逐字一致，zh 给出该句准确的中文意思（剧本里有译文就直接用）。',
+        `- openingLineEn 必须是 ${aiName} 在剧本里说过的英文，逐字照抄，不要改写。`,
+        '- openingHintZh 是一句中文，说明开场白的意思或学习者可以怎么接。',
+        '- title 必须是英文，不超过 6 个词。',
+        '',
+        '# 输出要求',
+        '只输出一个 JSON 对象，不要输出任何其他文字或 Markdown 代码块，字段如下：',
+        '{',
+        '  "title": "英文短标题（用于历史列表）",',
+        '  "settingZh": "中文场景设定，一到两句",',
+        '  "aiRole": "AI 扮演的角色（用剧本里的名字）",',
+        '  "userRole": "学习者扮演的角色（用剧本里的名字）",',
+        '  "targetExpressions": [{"en": "英文表达", "zh": "中文释义"}],',
+        '  "openingLineEn": "AI 的开场白（英文，逐字取自剧本）",',
         '  "openingHintZh": "开场白的中文提示"',
         '}',
     ].join('\n');

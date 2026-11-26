@@ -16,6 +16,16 @@ export const dialogueSession = sqliteTable('dp_dialogue_session', {
     anchor_text: text('anchor_text').notNull(),
     title: text('title').notNull(),
     scene_json: text('scene_json').notNull(),
+    /** 剧本起止字幕句序号；旧版按锚点句生成的对话为空。 */
+    clip_start: integer('clip_start', { mode: 'number' }),
+    clip_end: integer('clip_end', { mode: 'number' }),
+    /** 说话人显示名，学习者可改；为空时界面回落到「说话人 A/B」。 */
+    role_a_name: text('role_a_name'),
+    role_b_name: text('role_b_name'),
+    /** 学习者扮演哪一方：a / b。 */
+    learner_role: text('learner_role'),
+    /** 完整剧本 JSON（台词行 + 角色名 + 扮演方）。 */
+    script_json: text('script_json'),
     difficulty: text('difficulty').notNull(),
     backend: text('backend').notNull(),
     status: text('status').notNull(),

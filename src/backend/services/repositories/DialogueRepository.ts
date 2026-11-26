@@ -3,6 +3,7 @@ import type {
     DialogueModelBackend,
     DialogueReview,
     DialogueScene,
+    DialogueScript,
     DialogueSessionSummary,
     DialogueTurnVO,
 } from '@/common/contracts/dialogue';
@@ -20,6 +21,8 @@ export interface CreateDialogueSessionParams {
     anchorText: string;
     /** 场景卡。 */
     scene: DialogueScene;
+    /** 本次使用的剧本；未按剧本生成时为 null。 */
+    script: DialogueScript | null;
     /** 难度。 */
     difficulty: DialogueDifficulty;
     /** 模型后端。 */
@@ -66,6 +69,8 @@ export interface DialogueSessionRecord {
     session: DialogueSessionSummary;
     /** 场景卡。 */
     scene: DialogueScene;
+    /** 本次使用的剧本；旧版对话为 null。 */
+    script: DialogueScript | null;
     /** 复盘；未结束时为 null。 */
     review: DialogueReview | null;
 }

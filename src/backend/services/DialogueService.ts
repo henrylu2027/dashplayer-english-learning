@@ -15,6 +15,7 @@ import {
     DIALOGUE_BACKENDS,
     DIALOGUE_DIFFICULTIES,
     DIALOGUE_ROLES,
+    DIALOGUE_SPEAKERS,
     dialogueReviewDraftSchema,
     dialogueSceneSchema,
     type DialogueAvailability,
@@ -28,6 +29,7 @@ import {
     type DialogueReview,
     type DialogueReviewDraft,
     type DialogueScene,
+    type DialogueScript,
     type DialogueSessionSummary,
     type DialogueFocusLine,
     type DialogueStats,
@@ -44,6 +46,7 @@ import {
     buildDialogueSystemPrompt,
     buildReviewPrompt,
     buildScenePrompt,
+    buildScriptScenePrompt,
 } from '@/backend/services/dialogue/DialoguePromptBuilder';
 
 /**
@@ -115,6 +118,13 @@ const MAX_FOCUS_LINES = 6;
 /** 目标表达最多几个，与场景 schema 的上限一致。 */
 const MAX_TARGET_EXPRESSIONS = 4;
 
+/** 剧本最多保留的台词行数；再多，右侧轨道和提示词都会过长。 */
+const MAX_SCRIPT_LINES = 16;
+
+/** 说话人为空时使用的默认显示名。 */
+const DEFAULT_ROLE_A_NAME = '说话人 A';
+const DEFAULT_ROLE_B_NAME = '说话人 B';
+
 /**
  * 把文本归一化为用于目标表达匹配的字符串。
  * @param text 原始文本。
@@ -155,6 +165,54 @@ const normalizeFocusLines = (lines: DialogueFocusLine[] | undefined): DialogueFo
         }
     }
     return normalized;
+};
+
+/**
+ * 归一化前端传来的剧本。
+ *
+ * 说明：剧本来自视频字幕，是这段对话的"真实底本"，所以只做清洗不做改写——
+ * 台词保留原文，行序按传入顺序；角色名相同或为空时回落到「说话人 A/B」，
+ * 避免提示词里出现两个一样的名字。
+ *
+ * @param raw 前端传来的剧本（可能为空）。
+ * @param fallbackVideoKey 剧本没有带视频标识时使用的值。
+ * @returns 清洗后的剧本；没有可用台词时返回 null（退回旧行为）。
+ */
+const normalizeScript = (
+    raw: DialogueScript | undefined,
+    fallbackVideoKey: string,
+): DialogueScript | null => {
+    if (!raw || !Array.isArray(raw.lines)) {
+        return null;
+    }
+    const lines = raw.lines
+        .filter((line) => line && Number.isInteger(line.index) && (line.en ?? '').trim().length > 0
+            && DIALOGUE_SPEAKERS.includes(line.speaker))
+        .slice(0, MAX_SCRIPT_LINES)
+        .map((line) => {
+            const zh = (line.zh ?? '').trim();
+            return {
+                index: line.index,
+                en: line.en.trim(),
+                ...(zh ? { zh } : {}),
+                speaker: line.speaker,
+            };
+        });
+    if (lines.length === 0) {
+        return null;
+    }
+    const roleA = (raw.roleAName ?? '').trim() || DEFAULT_ROLE_A_NAME;
+    const roleB = (raw.roleBName ?? '').trim() || DEFAULT_ROLE_B_NAME;
+    const distinct = roleA === roleB;
+    return {
+        videoKey: (raw.videoKey ?? '').trim() || fallbackVideoKey,
+        startIndex: lines[0].index,
+        endIndex: lines[lines.length - 1].index,
+        lines,
+        roleAName: distinct ? DEFAULT_ROLE_A_NAME : roleA,
+        roleBName: distinct ? DEFAULT_ROLE_B_NAME : roleB,
+        learnerRole: raw.learnerRole === 'b' ? 'b' : 'a',
+    };
 };
 
 /**
@@ -269,6 +327,8 @@ export class DialogueServiceImpl implements DialogueService {
             .slice(0, MAX_CONTEXT_LINES);
         // 学习者练过的台词：至少两句才参与取材，否则退回按当前句生成
         const focusLines = normalizeFocusLines(request.focusLines);
+        // 剧本：有值时场景围绕这段真实对话展开，目标表达也锁定在剧本内
+        const script = normalizeScript(request.script, source.videoKey ?? '');
 
         if (request.backend === 'local') {
             this.localAiService.beginDialogueSession();
@@ -279,11 +339,13 @@ export class DialogueServiceImpl implements DialogueService {
                 anchorText,
                 paragraphLines,
                 focusLines,
+                script,
                 difficulty: request.difficulty,
                 backend: request.backend,
             });
-            // 练过的句子优先：目标表达在代码层锁定为原句，避免模型改写后复盘核对不上
-            const scene = applyFocusTargets(generatedScene, focusLines);
+            // 有剧本时目标表达已经限定在剧本内，不再用练习记录覆盖；
+            // 没有剧本时才走「练过的句子优先」，避免模型改写后复盘核对不上
+            const scene = script ? generatedScene : applyFocusTargets(generatedScene, focusLines);
             const systemPrompt = buildDialogueSystemPrompt({ scene, difficulty: request.difficulty });
             chatSessionId = this.chatSessionService.create({
                 videoId: source.videoKey,
@@ -300,6 +362,7 @@ export class DialogueServiceImpl implements DialogueService {
                 source,
                 anchorText,
                 scene,
+                script,
                 difficulty: request.difficulty,
                 backend: request.backend,
             });
@@ -317,7 +380,7 @@ export class DialogueServiceImpl implements DialogueService {
                 focusCount: focusLines.length,
                 focusLocked: focusLines.length >= 2,
             });
-            return { session: record.session, scene };
+            return { session: record.session, scene, script: record.script };
         } catch (error) {
             if (chatSessionId) {
                 this.closeChatSession(chatSessionId);
@@ -434,6 +497,7 @@ export class DialogueServiceImpl implements DialogueService {
         return {
             session: record.session,
             scene: record.scene,
+            script: record.script,
             turns,
             review: record.review,
         };
@@ -449,10 +513,18 @@ export class DialogueServiceImpl implements DialogueService {
         paragraphLines: string[];
         /** 学习者练过的台词；有值时场景必须复用这些原句。 */
         focusLines: DialogueFocusLine[];
+        /** 真实台词剧本；有值时按剧本生成，不再另编场景。 */
+        script: DialogueScript | null;
         difficulty: DialogueCreateRequest['difficulty'];
         backend: DialogueModelBackend;
     }): Promise<DialogueScene> {
-        const prompt = buildScenePrompt(params);
+        const prompt = params.script
+            ? buildScriptScenePrompt({
+                anchorText: params.anchorText,
+                script: params.script,
+                difficulty: params.difficulty,
+            })
+            : buildScenePrompt(params);
         if (params.backend === 'local') {
             const modelId = await this.localAiService.getActiveModelId();
             const raw = await this.localAiService.generate(
