@@ -407,7 +407,7 @@ export default function DialoguePage() {
                     )}
                     </div>
                     {detail.script && railOpen && (
-                        <div className="min-h-0 lg:sticky lg:top-0 lg:max-h-[calc(100vh-180px)]">
+                        <div className="min-h-0 lg:sticky lg:top-0 lg:h-[calc(100vh-150px)]">
                             <ClipTranscriptRail
                                 script={detail.script}
                                 focusIndex={detail.turns.filter((turn) => turn.role === 'user').length}
@@ -496,7 +496,7 @@ export default function DialoguePage() {
                 />
                 </div>
                 {script && railOpen && (
-                    <div className="min-h-0 lg:sticky lg:top-0 lg:max-h-[calc(100vh-180px)]">
+                    <div className="min-h-0 lg:sticky lg:top-0 lg:h-[calc(100vh-150px)]">
                         <ClipTranscriptRail
                             script={script}
                             focusIndex={0}

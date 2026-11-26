@@ -400,7 +400,8 @@ export default function DialogueSessionView({
         )}>
             {conversationPane}
             {railOpen && (
-                <div className="min-h-0 lg:sticky lg:top-0 lg:max-h-[calc(100vh-180px)]">
+                // 台词轨自己占一列、自己滚动：高度按窗口算固定值，不再跟着整页一起滚
+                <div className="min-h-0 lg:sticky lg:top-0 lg:h-[calc(100vh-150px)]">
                     <ClipTranscriptRail
                         script={script}
                         focusIndex={activeLineIndex}

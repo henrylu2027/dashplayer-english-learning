@@ -51,7 +51,7 @@ export default function ClipTranscriptRail({
     );
 
     return (
-        <aside className="flex min-h-0 select-text flex-col rounded-2xl border border-border/60 bg-card shadow-xs">
+        <aside className="flex h-full min-h-0 select-text flex-col rounded-2xl border border-border/60 bg-card shadow-xs">
             <div className="flex items-start justify-between gap-2 border-b border-border/50 px-4 py-3">
                 <div className="min-w-0">
                     <div className="text-sm font-medium text-foreground">{t('dialogue.scriptTitle')}</div>
