@@ -40,9 +40,8 @@ const logger = getRendererLogger('DialoguePage');
 /** 历史列表条数。 */
 const HISTORY_LIMIT = 10;
 
-/** 剧本默认截取范围：锚点句前后各取几句。 */
-const SCRIPT_WINDOW_BEFORE = 4;
-const SCRIPT_WINDOW_AFTER = 5;
+/** 整部视频的台词上限：超长字幕文件不整段搬运，避免 IPC 与界面过载。 */
+const MAX_SCRIPT_LINES = 2000;
 
 /**
  * 场景对话页：从当前台词生成角色扮演场景，语音或文字演完，结束后复盘。
@@ -146,24 +145,24 @@ export default function DialoguePage() {
     const resolvedRoleB = roleBName.trim() || t('dialogue.roleDefault.b');
 
     /**
-     * 从当前视频截取一段真实台词作为剧本。
+     * 把整部视频的台词整理成剧本。
      *
-     * 说明：字幕文件没有说话人字段，这里按顺序交替分配 A/B 作为近似，
-     * 界面上会明确提示「自动分配、可能不准」。锚点不在序列里时退化为单句。
+     * 说明：右侧轨道要能从头翻到尾，所以这里取全部字幕；
+     * 排练从锚点句（startIndex）开始，之前的台词只作为上下文展示。
+     * 字幕文件没有说话人字段，按顺序交替分配 A/B 作为近似，界面上已注明可能不准。
      */
     const script = useMemo<DialogueScript | null>(() => {
         if (!currentSentence) {
             return null;
         }
-        const ordered = [...sentences].sort((a, b) => a.index - b.index);
-        const position = ordered.findIndex((item) => item.index === currentSentence.index);
+        const ordered = [...sentences].sort((a, b) => a.index - b.index).slice(0, MAX_SCRIPT_LINES);
         const toScriptLine = (index: number, text: string, zh: string | undefined, speaker: DialogueSpeaker) => ({
             index,
             en: text,
             ...(zh && zh.trim() ? { zh } : {}),
             speaker,
         });
-        if (position < 0) {
+        if (ordered.length === 0) {
             return {
                 videoKey: currentSentence.fileHash,
                 startIndex: currentSentence.index,
@@ -174,18 +173,11 @@ export default function DialoguePage() {
                 learnerRole,
             };
         }
-        const slice = ordered.slice(
-            Math.max(0, position - SCRIPT_WINDOW_BEFORE),
-            Math.min(ordered.length, position + SCRIPT_WINDOW_AFTER + 1),
-        );
-        if (slice.length === 0) {
-            return null;
-        }
         return {
             videoKey: currentSentence.fileHash,
-            startIndex: slice[0].index,
-            endIndex: slice[slice.length - 1].index,
-            lines: slice.map((item, offset) => toScriptLine(
+            startIndex: currentSentence.index,
+            endIndex: ordered[ordered.length - 1].index,
+            lines: ordered.map((item, offset) => toScriptLine(
                 item.index,
                 item.text,
                 item.textZH,

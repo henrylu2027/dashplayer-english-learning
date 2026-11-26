@@ -134,8 +134,13 @@ const MAX_FOCUS_LINES = 6;
 /** 目标表达最多几个，与场景 schema 的上限一致。 */
 const MAX_TARGET_EXPRESSIONS = 4;
 
-/** 剧本最多保留的台词行数；再多，右侧轨道和提示词都会过长。 */
-const MAX_SCRIPT_LINES = 16;
+/**
+ * 剧本最多保留的台词行数。
+ *
+ * 右侧轨道要能翻完整部视频，所以放宽到整段字幕；提示词只取锚点附近的若干行，
+ * 不会把整部台词塞进模型上下文。
+ */
+const MAX_SCRIPT_LINES = 2000;
 
 /** 说话人为空时使用的默认显示名。 */
 const DEFAULT_ROLE_A_NAME = '说话人 A';
@@ -236,7 +241,8 @@ const normalizeScript = (
     const distinct = roleA === roleB;
     return {
         videoKey: (raw.videoKey ?? '').trim() || fallbackVideoKey,
-        startIndex: lines[0].index,
+        // 排练起点由前端给出（锚点句）；缺失时退回第一行
+        startIndex: Number.isInteger(raw.startIndex) ? raw.startIndex : lines[0].index,
         endIndex: lines[lines.length - 1].index,
         lines,
         roleAName: distinct ? DEFAULT_ROLE_A_NAME : roleA,

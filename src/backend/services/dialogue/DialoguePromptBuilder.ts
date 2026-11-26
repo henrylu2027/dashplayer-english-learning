@@ -103,13 +103,19 @@ export const buildScenePrompt = (params: {
  * @param script 剧本。
  * @returns 逐行台词；有译文时附在括号里。
  */
-const formatScriptLines = (script: DialogueScript): string => script.lines
+const formatScriptLines = (
+    script: DialogueScript,
+    lines: DialogueScript['lines'] = script.lines,
+): string => lines
     .map((line) => {
         const name = line.speaker === 'a' ? script.roleAName : script.roleBName;
         const zh = line.zh?.trim();
         return zh ? `${name}：${line.en}（${zh}）` : `${name}：${line.en}`;
     })
     .join('\n');
+
+/** 场景提示词里最多带几句台词；整部字幕太长，只取锚点附近这一段。 */
+const PROMPT_SCRIPT_LINES = 12;
 
 /**
  * 构建「跟着原片演」的场景提示词。
@@ -135,7 +141,10 @@ export const buildScriptScenePrompt = (params: {
         '你在为英语学习工具设计一个角色扮演场景。学习者要跟着一段真实视频对话演一遍。',
         '',
         '原片剧本（来自视频字幕，按播放顺序，逐字照抄）：',
-        formatScriptLines(script),
+        formatScriptLines(script, (() => {
+            const start = Math.max(0, script.lines.findIndex((line) => line.index >= script.startIndex));
+            return script.lines.slice(start, start + PROMPT_SCRIPT_LINES);
+        })()),
         '',
         '剧本里只有两个人：',
         `- ${script.roleAName}（说话人 A）`,

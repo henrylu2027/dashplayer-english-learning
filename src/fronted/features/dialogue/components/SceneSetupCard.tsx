@@ -98,6 +98,17 @@ export default function SceneSetupCard({
         { value: 'b', name: displayB },
     ];
 
+    // 预览只显示锚点句往后的几行：整部台词在右侧轨道里
+    const startPosition = script
+        ? Math.max(0, script.lines.findIndex((line) => line.index >= script.startIndex))
+        : 0;
+    const previewLines = script
+        ? script.lines.slice(startPosition, startPosition + PREVIEW_LINES)
+        : [];
+    const remainingLines = script
+        ? Math.max(0, script.lines.length - startPosition - PREVIEW_LINES)
+        : 0;
+
     return (
         <section className="flex flex-col gap-4 rounded-2xl border border-border/60 bg-card p-5 shadow-xs">
             <div>
@@ -111,15 +122,14 @@ export default function SceneSetupCard({
                     <div className="mb-1.5 flex flex-wrap items-baseline gap-2">
                         <span className="text-xs text-muted-foreground">{t('dialogue.scriptTitle')}</span>
                         <span className="text-xs text-muted-foreground/80">
-                            {t('dialogue.scriptRange', {
-                                start: script.startIndex,
-                                end: script.endIndex,
+                            {t('dialogue.scriptFullRange', {
                                 count: script.lines.length,
+                                start: script.startIndex,
                             })}
                         </span>
                     </div>
                     <div className="flex flex-col gap-1.5 rounded-xl bg-muted/40 px-3 py-2.5">
-                        {script.lines.slice(0, PREVIEW_LINES).map((line) => (
+                        {previewLines.map((line) => (
                             <div key={line.index} className="flex gap-2 text-xs leading-5">
                                 <span className="w-16 shrink-0 truncate text-muted-foreground">
                                     {line.speaker === 'a' ? displayA : displayB}
@@ -127,9 +137,9 @@ export default function SceneSetupCard({
                                 <span className="min-w-0 flex-1 text-foreground/90">{line.en}</span>
                             </div>
                         ))}
-                        {script.lines.length > PREVIEW_LINES && (
+                        {remainingLines > 0 && (
                             <div className="text-[11px] text-muted-foreground">
-                                {t('dialogue.scriptMore', { count: script.lines.length - PREVIEW_LINES })}
+                                {t('dialogue.scriptMore', { count: remainingLines })}
                             </div>
                         )}
                     </div>

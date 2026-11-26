@@ -56,6 +56,30 @@ export const getWordAudioUrl = async (word: string): Promise<Nullable<string>> =
     }
 };
 
+/**
+ * 播放音频并等到播完。
+ *
+ * 说明：朗读排队时用得上——上一句没读完就播下一句会互相打断。
+ * 播放失败或被打断时同样会 resolve，避免队列卡死。
+ *
+ * @param audioUrl 音频地址。
+ */
+export const playAudioUrlAndWait = async (audioUrl: Nullable<string>): Promise<void> => {
+    if (TypeGuards.isNull(audioUrl)) {
+        return;
+    }
+    player?.pause();
+    player = new Audio(audioUrl);
+    player.volume = 1;
+    await new Promise<void>((resolve) => {
+        const done = (): void => resolve();
+        player?.addEventListener('ended', done, { once: true });
+        player?.addEventListener('pause', done, { once: true });
+        player?.addEventListener('error', done, { once: true });
+        player?.play().catch(done);
+    });
+};
+
 export const getTtsUrl = async (str: string) => {
     str = str.trim();
     if (StrUtil.isBlank(str)) {

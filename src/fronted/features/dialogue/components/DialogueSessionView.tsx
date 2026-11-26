@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import toast from 'react-hot-toast';
 import { CheckCheck, Loader2, Volume2 } from 'lucide-react';
@@ -10,8 +10,10 @@ import type {
     DialogueScene,
     DialogueScript,
     DialogueSessionSummary,
+    DialogueSpeaker,
 } from '@/common/contracts/dialogue';
 import { Button } from '@/fronted/components/ui/button';
+import { getTtsUrl, playAudioUrlAndWait } from '@/fronted/infrastructure/audio/AudioPlayer';
 import { getRendererLogger } from '@/fronted/log/simple-logger';
 import { cn } from '@/fronted/lib/utils';
 import { dialogueApi } from '../dialogueApi';
@@ -90,18 +92,44 @@ export default function DialogueSessionView({
     onSpeak: (text: string) => void;
 }) {
     const { t } = useTranslation('pages');
+    const lines = useMemo(() => script?.lines ?? [], [script]);
+    /** 排练起点：锚点句在整部台词里的位置。 */
+    const startPosition = useMemo(() => {
+        if (!script) {
+            return 0;
+        }
+        const index = lines.findIndex((line) => line.index >= script.startIndex);
+        return index < 0 ? 0 : index;
+    }, [lines, script]);
+
     const [items, setItems] = useState<ScriptedItem[]>([]);
     /** 剧本里下一条要处理的行；等于行数表示台词演完了。 */
-    const [cursor, setCursor] = useState(0);
+    const [cursor, setCursor] = useState(startPosition);
     /** 正在纠错的学习者发言序号。 */
     const [correctingUserIndex, setCorrectingUserIndex] = useState<number | null>(null);
     const [finishing, setFinishing] = useState(false);
+    /** 学习者扮演哪一方；可以在对话中随时互换。 */
+    const [learnerRole, setLearnerRole] = useState<DialogueSpeaker>(script?.learnerRole ?? 'a');
     const bottomRef = useRef<HTMLDivElement | null>(null);
     /** 已经落库的行，避免 effect 重跑时重复写入。 */
     const persistedRef = useRef<Set<string>>(new Set());
+    /** 朗读队列：上一句读完再读下一句，避免互相打断。 */
+    const speechQueueRef = useRef<Promise<void>>(Promise.resolve());
 
-    const lines = useMemo(() => script?.lines ?? [], [script]);
-    const learnerRole = script?.learnerRole ?? 'a';
+    const enqueueSpeech = useCallback((text: string): void => {
+        if (!text.trim()) {
+            return;
+        }
+        speechQueueRef.current = speechQueueRef.current
+            .then(async () => {
+                const url = await getTtsUrl(text);
+                await playAudioUrlAndWait(url);
+            })
+            .catch((error) => {
+                logger.warn('朗读失败', { error });
+            });
+    }, []);
+
     const currentLine = cursor < lines.length ? lines[cursor] : null;
     const waitingForLearner = currentLine?.speaker === learnerRole;
     const finishedScript = lines.length > 0 && cursor >= lines.length;
@@ -119,6 +147,8 @@ export default function DialogueSessionView({
             const id = `ai-${cursor}`;
             setItems((previous) => [...previous, { id, role: 'assistant', text: line.en, hintZh: line.zh }]);
             setCursor((value) => value + 1);
+            // 台词出现的同一时刻读出来
+            enqueueSpeech(line.en);
             if (!persistedRef.current.has(id)) {
                 persistedRef.current.add(id);
                 void dialogueApi.appendTurn({
@@ -131,7 +161,7 @@ export default function DialogueSessionView({
             }
         }, AI_LINE_DELAY_MS);
         return () => clearTimeout(timer);
-    }, [cursor, lines, learnerRole, script, session.id]);
+    }, [cursor, lines, learnerRole, script, session.id, enqueueSpeech]);
 
     useEffect(() => {
         bottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
@@ -159,6 +189,8 @@ export default function DialogueSessionView({
             userIndex,
             correction: null,
         }]);
+        // 学习者这句也读一遍：作为标准发音示范
+        enqueueSpeech(text);
         // 说一句就往下走一句，不卡在学习者这一轮
         setCursor((value) => value + 1);
         setCorrectingUserIndex(userIndex);
@@ -206,6 +238,20 @@ export default function DialogueSessionView({
             <SceneCardView scene={scene} onSpeak={onSpeak} />
 
             <section className="flex flex-col gap-4 rounded-2xl border border-border/60 bg-card p-5 shadow-xs">
+                <div className="flex items-center justify-between gap-2 border-b border-border/50 pb-3">
+                    <div className="text-xs text-muted-foreground">
+                        {t('dialogue.youPlay', { name: learnerRole === 'a' ? script.roleAName : script.roleBName })}
+                    </div>
+                    <Button
+                        type="button"
+                        size="sm"
+                        variant="ghost"
+                        className="h-7 rounded-lg px-2 text-xs"
+                        onClick={() => setLearnerRole((current) => (current === 'a' ? 'b' : 'a'))}
+                    >
+                        {t('dialogue.swapRoles')}
+                    </Button>
+                </div>
                 <div className="flex flex-col gap-3">
                     {items.map((item) => (
                         <div
@@ -217,7 +263,7 @@ export default function DialogueSessionView({
                             </div>
                             <div
                                 className={cn(
-                                    'group relative max-w-[85%] whitespace-pre-wrap rounded-2xl px-3.5 py-2.5 text-sm leading-6',
+                                    'group relative max-w-[85%] select-text whitespace-pre-wrap rounded-2xl px-3.5 py-2.5 text-sm leading-6',
                                     item.role === 'user'
                                         ? 'rounded-tr-sm bg-primary text-primary-foreground'
                                         : 'rounded-tl-sm bg-muted/70 text-foreground',
