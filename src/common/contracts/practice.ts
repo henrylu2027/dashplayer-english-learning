@@ -67,6 +67,20 @@ export interface DictationResult {
     correctWordCount: number;
     /** 词准确率，0~100。 */
     accuracy: number;
+    /** 本地模型给出的语法分，0~100；模型不可用时为 null。 */
+    grammarScore: number | null;
+    /** 发音分，0~100；听写没有录音，固定为 null。 */
+    pronunciationScore: number | null;
+    /** 与参考句的相似度，0~100；模型不可用时为 null。 */
+    similarityScore: number | null;
+    /** 语句层面的问题，形如「时态：过去时写成了现在时」；模型不可用时为空数组。 */
+    grammarIssues: string[];
+    /** 模型挑出的值得记的生词/句型；模型不可用时为空数组。 */
+    vocab: string[];
+    /** 模型的一句点评；模型不可用时为 null。 */
+    graderNote: string | null;
+    /** 评分失败原因；成功时为 null。 */
+    graderError: string | null;
 }
 
 /**
@@ -107,6 +121,22 @@ export interface RetellResult {
     keywords: RetellKeywordFeedback[];
     /** 关键词覆盖率，0~100。 */
     coverage: number;
+    /** 参考句与识别文本的逐词对齐结果，用于错词/漏词/多余词着色。 */
+    words: ShadowingWordFeedback[];
+    /** 本地模型给出的语法分，0~100；模型不可用时为 null。 */
+    grammarScore: number | null;
+    /** 本地模型给出的发音分，0~100；模型不可用时为 null。 */
+    pronunciationScore: number | null;
+    /** 与参考句的相似度，0~100；模型不可用时为 null。 */
+    similarityScore: number | null;
+    /** 语句层面的问题，形如「时态：过去时写成了现在时」；模型不可用时为空数组。 */
+    grammarIssues: string[];
+    /** 模型挑出的值得记的生词/句型；模型不可用时为空数组。 */
+    vocab: string[];
+    /** 模型的一句点评；模型不可用时为 null。 */
+    graderNote: string | null;
+    /** 评分失败原因；成功时为 null。 */
+    graderError: string | null;
 }
 
 /**

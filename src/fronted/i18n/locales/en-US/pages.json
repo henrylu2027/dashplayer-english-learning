@@ -458,7 +458,15 @@
         "addToVocab": "Add to vocabulary",
         "wordsAdded": "Added {{count}} words to the vocabulary studio",
         "wordsAddFailed": "Failed to add words",
-        "listenAgain": "Listen again"
+        "listenAgain": "Listen again",
+        "pronunciation": "Pronunciation",
+        "pronunciationNoAudio": "Dictation has no audio, so pronunciation is not scored",
+        "grammar": "Grammar",
+        "wrongWordsHint": "{{wrong}} wrong, {{missing}} missed",
+        "graderUnavailable": "Local model grading unavailable",
+        "queueEmptyShort": "Use Import all lines above",
+        "playThisLine": "Play this line",
+        "similarity": "Similarity {{score}}"
     },
     "dialogue": {
         "title": "Scene Dialogue",

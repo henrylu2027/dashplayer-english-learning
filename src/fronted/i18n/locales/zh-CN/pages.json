@@ -458,7 +458,15 @@
         "addToVocab": "加入生词本",
         "wordsAdded": "已加入 {{count}} 个生词到词汇工坊",
         "wordsAddFailed": "加入生词本失败",
-        "listenAgain": "再听一遍"
+        "listenAgain": "再听一遍",
+        "pronunciation": "发音",
+        "pronunciationNoAudio": "听写没有录音，发音分不计",
+        "grammar": "语法",
+        "wrongWordsHint": "读错/写错 {{wrong}} 处，漏写 {{missing}} 处",
+        "graderUnavailable": "本地模型评分不可用",
+        "queueEmptyShort": "点上方导入整视频分句",
+        "playThisLine": "播放这一句原声",
+        "similarity": "相似度 {{score}}"
     },
     "dialogue": {
         "title": "场景对话",

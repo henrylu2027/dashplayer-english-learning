@@ -15,6 +15,8 @@ import type {
 } from '@/common/contracts/practice';
 import type RecordedSpeechService from '@/backend/services/speech/RecordedSpeechService';
 import type SentenceAudioService from '@/backend/services/SentenceAudioService';
+import type OllamaGrader from '@/backend/services/practice/OllamaGrader';
+import type { PracticeGrade } from '@/backend/services/practice/OllamaGrader';
 import type PracticeAttemptRepository from '@/backend/services/repositories/PracticeAttemptRepository';
 import { alignText } from '@/backend/services/shadowing/ShadowingScorer';
 import { normalizeShadowingSource } from '@/backend/services/shadowing/ShadowingSource';
@@ -90,6 +92,9 @@ export class PracticeServiceImpl implements PracticeService {
     @inject(TYPES.SentenceAudioService)
     private sentenceAudioService!: SentenceAudioService;
 
+    @inject(TYPES.OllamaGrader)
+    private ollamaGrader!: OllamaGrader;
+
     public async dictation(request: DictationRequest): Promise<DictationResult> {
         const referenceText = this.validateReferenceText(request.referenceText);
         const typedText = request.typedText.trim();
@@ -113,12 +118,18 @@ export class PracticeServiceImpl implements PracticeService {
             correctWordCount: alignment.correctWordCount,
             accuracy,
         });
+        const grade = await this.gradeQuietly({
+            referenceText,
+            learnerText: typedText,
+            mode: 'dictation',
+        });
         return {
             attempt,
             words: alignment.words,
             referenceWordCount: alignment.referenceWordCount,
             correctWordCount: alignment.correctWordCount,
             accuracy,
+            ...grade,
         };
     }
 
@@ -162,13 +173,69 @@ export class PracticeServiceImpl implements PracticeService {
             coverage,
             durationSec: Math.round(speech.durationSec * 100) / 100,
         });
+        // 复述同样做逐词对齐：错词/漏词/多余词用对齐结果着色，模型只负责语法与点评
+        const alignment = alignText(referenceText, speech.text);
+        const grade = await this.gradeQuietly({
+            referenceText,
+            learnerText: speech.text,
+            mode: 'retell',
+        });
         return {
             attempt,
             referenceText,
             recognizedText: speech.text,
             keywords: feedback,
             coverage,
+            words: alignment.words,
+            ...grade,
         };
+    }
+
+    /**
+     * 调用本地模型评分；模型不可用时把原因带回界面，不编造分数。
+     *
+     * @param input 参考句、学习者输出与模式。
+     * @returns 可以直接展开进结果对象的分项评分字段。
+     */
+    private async gradeQuietly(input: {
+        referenceText: string;
+        learnerText: string;
+        mode: 'dictation' | 'retell';
+    }): Promise<{
+        grammarScore: number | null;
+        pronunciationScore: number | null;
+        similarityScore: number | null;
+        grammarIssues: string[];
+        vocab: string[];
+        graderNote: string | null;
+        graderError: string | null;
+    }> {
+        try {
+            const grade: PracticeGrade = await this.ollamaGrader.grade(input);
+            return {
+                grammarScore: grade.grammar,
+                pronunciationScore: grade.pronunciation,
+                similarityScore: grade.similarity,
+                grammarIssues: grade.issues,
+                vocab: grade.vocab,
+                graderNote: grade.note || null,
+                graderError: null,
+            };
+        } catch (error) {
+            this.logger.warn('ollama grading failed', {
+                mode: input.mode,
+                error: error instanceof Error ? error.message : String(error),
+            });
+            return {
+                grammarScore: null,
+                pronunciationScore: null,
+                similarityScore: null,
+                grammarIssues: [],
+                vocab: [],
+                graderNote: null,
+                graderError: error instanceof Error ? error.message : String(error),
+            };
+        }
     }
 
     public async listAttempts(query: PracticeAttemptQuery = {}): Promise<PracticeAttemptSummary[]> {

@@ -3,7 +3,6 @@ import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import {
-    ArrowRightLeft,
     BookOpen,
     CheckCheck,
     Loader2,
@@ -22,6 +21,7 @@ import type {
     RetellResult,
 } from '@/common/contracts/practice';
 import type { ShadowingAttemptSource, ShadowingWordStatus } from '@/common/contracts/shadowing';
+import UrlUtil from '@/common/utils/UrlUtil';
 import PageHeader from '@/fronted/components/shared/common/PageHeader';
 import { Button } from '@/fronted/components/ui/button';
 import { Textarea } from '@/fronted/components/ui/textarea';
@@ -109,6 +109,65 @@ export default function PracticePage() {
 
     const current = queue[cursor] ?? null;
     const audio = usePracticeAudio(current?.source ?? null);
+
+    /** 队列容器，用于把当前句滚进可视区。 */
+    const queueListRef = useRef<HTMLDivElement | null>(null);
+
+    /** 队列行内试听：正在播放/加载的句子 ID。 */
+    const [rowPlayingId, setRowPlayingId] = useState<string | null>(null);
+    const [rowLoadingId, setRowLoadingId] = useState<string | null>(null);
+    const rowAudioRef = useRef<HTMLAudioElement | null>(null);
+
+    /** 停掉队列行里的试听。 */
+    const stopRowAudio = useCallback((): void => {
+        rowAudioRef.current?.pause();
+        rowAudioRef.current = null;
+        setRowPlayingId(null);
+    }, []);
+
+    /**
+     * 试听队列里某一句的原声；再点一次停止。
+     * @param item 目标句子。
+     */
+    const playRow = async (item: QueueItem): Promise<void> => {
+        if (rowPlayingId === item.id) {
+            stopRowAudio();
+            return;
+        }
+        stopRowAudio();
+        audio.stop();
+        setRowLoadingId(item.id);
+        try {
+            const filePath = await practiceApi.sentenceAudio(item.source);
+            const element = new Audio(UrlUtil.toUrl(filePath));
+            rowAudioRef.current = element;
+            element.onended = () => {
+                rowAudioRef.current = null;
+                setRowPlayingId(null);
+            };
+            await element.play();
+            setRowPlayingId(item.id);
+        } catch (playError) {
+            logger.error('试听原声失败', { error: playError, itemId: item.id });
+            toast.error(playError instanceof Error ? playError.message : t('practice.listenFailed'));
+        } finally {
+            setRowLoadingId(null);
+        }
+    };
+
+    // 离开页面时停掉行内试听
+    useEffect(() => {
+        return () => {
+            rowAudioRef.current?.pause();
+            rowAudioRef.current = null;
+        };
+    }, []);
+
+    // 当前句始终滚进队列可视区，切句后不用手动翻
+    useEffect(() => {
+        const active = queueListRef.current?.querySelector('[data-current="true"]');
+        active?.scrollIntoView({ block: 'nearest' });
+    }, [cursor, queue.length]);
 
     /** 已经导入过一次就不再自动覆盖用户的选择。 */
     const didAutoImportRef = useRef(false);
@@ -265,33 +324,40 @@ export default function PracticePage() {
         void recorder.start();
     };
 
-    /** 需要练的词：听写的错词/漏词/多余词，或复述没覆盖的关键词。 */
+    /** 需要练的词：对齐出的错词/漏词/多余词 + 模型挑出的生词。 */
     const problemWords = useMemo((): string[] => {
-        if (mode === 'dictation' && dictation) {
-            const seen = new Set<string>();
-            const words: string[] = [];
-            for (const word of dictation.words) {
-                if (word.status === 'correct') {
-                    continue;
-                }
-                const text = (word.expected ?? word.actual ?? '').trim();
-                if (!text) {
-                    continue;
-                }
-                const key = text.toLowerCase();
-                if (seen.has(key)) {
-                    continue;
-                }
-                seen.add(key);
-                words.push(text);
+        const resultWords = dictation?.words ?? retell?.words ?? [];
+        const modelVocab = dictation?.vocab ?? retell?.vocab ?? [];
+        const seen = new Set<string>();
+        const words: string[] = [];
+        const push = (raw: string): void => {
+            const text = raw.trim();
+            if (!text) {
+                return;
             }
-            return words;
+            const key = text.toLowerCase();
+            if (seen.has(key)) {
+                return;
+            }
+            seen.add(key);
+            words.push(text);
+        };
+        for (const word of resultWords) {
+            if (word.status !== 'correct') {
+                push(word.expected ?? word.actual ?? '');
+            }
         }
-        if (mode === 'retell' && retell) {
-            return retell.keywords.filter((keyword) => !keyword.covered).map((keyword) => keyword.word);
+        for (const word of modelVocab) {
+            push(word);
         }
-        return [];
-    }, [dictation, mode, retell]);
+        return words;
+    }, [dictation, retell]);
+
+    /** 当前结果里的逐词标记来源。 */
+    const resultWords = dictation?.words ?? retell?.words ?? [];
+    /** 模型给的语法问题与相似度。 */
+    const grammarIssues = dictation?.grammarIssues ?? retell?.grammarIssues ?? [];
+    const similarity = dictation?.similarityScore ?? retell?.similarityScore ?? null;
 
     /** 一键加入生词本（词汇工坊）。 */
     const handleAddWords = async (): Promise<void> => {
@@ -320,7 +386,6 @@ export default function PracticePage() {
         navigate(videoId ? `/player/${videoId}?sideBarAnimation=false` : '/home');
     };
 
-    const videoName = videoPath?.split(/[\\/]/).pop() ?? '';
     const hasResult = Boolean(dictation || retell);
     const overallScore = dictation?.accuracy ?? retell?.coverage ?? null;
     const coveredCount = retell?.keywords.filter((keyword) => keyword.covered).length ?? 0;
@@ -334,34 +399,6 @@ export default function PracticePage() {
             <div className="flex-1 min-h-0 overflow-y-auto px-6 pb-6 pt-2">
                 <div className="mx-auto grid w-full max-w-5xl gap-4 lg:grid-cols-[minmax(0,1fr)_240px]">
                     <div className="flex min-w-0 flex-col gap-4">
-                        {/* 顶部分句视频信息栏 */}
-                        <section className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-border/60 bg-card px-4 py-3 shadow-xs">
-                            <div className="min-w-0">
-                                <div className="text-xs text-muted-foreground">
-                                    {t('practice.currentSentence')}
-                                    <span className="ml-1 tabular-nums">
-                                        {queue.length === 0 ? '0/0' : `${cursor + 1}/${queue.length}`}
-                                    </span>
-                                </div>
-                                <div className="mt-0.5 truncate text-sm text-foreground">
-                                    {videoName
-                                        ? t('practice.videoTitle', { name: videoName })
-                                        : t('practice.videoUnknown')}
-                                </div>
-                            </div>
-                            <Button
-                                type="button"
-                                size="sm"
-                                variant="outline"
-                                className="h-8 shrink-0 rounded-lg px-3 text-xs"
-                                disabled={queue.length === 0}
-                                onClick={goNext}
-                            >
-                                <ArrowRightLeft className="mr-1 h-3.5 w-3.5" />
-                                {t('practice.changeSentence')}
-                            </Button>
-                        </section>
-
                         {/* 听写 / 复述 */}
                         <div className="flex gap-1 rounded-xl bg-muted p-1">
                             {(['dictation', 'retell'] as const).map((item) => (
@@ -551,25 +588,45 @@ export default function PracticePage() {
                                     <div className="grid flex-1 grid-cols-3 gap-2">
                                         {dictation && (
                                             <>
-                                                <Metric label={t('practice.correctRate')} value={`${dictation.accuracy}%`} />
-                                                <Metric label={t('practice.wrongWords')} value={String(countStatus(dictation, 'mispronounced'))} />
-                                                <Metric label={t('practice.missingWords')} value={String(countStatus(dictation, 'missing'))} />
+                                                <Metric
+                                                    label={t('practice.pronunciation')}
+                                                    value={dictation.pronunciationScore === null ? '—' : `${dictation.pronunciationScore}`}
+                                                    hint={dictation.pronunciationScore === null ? t('practice.pronunciationNoAudio') : undefined}
+                                                />
+                                                <Metric
+                                                    label={t('practice.grammar')}
+                                                    value={dictation.grammarScore === null ? '—' : `${dictation.grammarScore}`}
+                                                />
+                                                <Metric
+                                                    label={t('practice.wrongWords')}
+                                                    value={`${countStatus(dictation, 'mispronounced') + countStatus(dictation, 'missing')}`}
+                                                    hint={t('practice.wrongWordsHint', { wrong: countStatus(dictation, 'mispronounced'), missing: countStatus(dictation, 'missing') })}
+                                                />
                                             </>
                                         )}
                                         {retell && (
                                             <>
-                                                <Metric label={t('practice.coverage')} value={`${retell.coverage}%`} />
-                                                <Metric label={t('practice.keywordHit')} value={`${coveredCount}/${retell.keywords.length}`} />
-                                                <Metric label={t('practice.recognizedWords')} value={String(retell.recognizedText.trim().split(/\s+/).filter(Boolean).length)} />
+                                                <Metric
+                                                    label={t('practice.pronunciation')}
+                                                    value={retell.pronunciationScore === null ? '—' : `${retell.pronunciationScore}`}
+                                                />
+                                                <Metric
+                                                    label={t('practice.grammar')}
+                                                    value={retell.grammarScore === null ? '—' : `${retell.grammarScore}`}
+                                                />
+                                                <Metric
+                                                    label={t('practice.keywordHit')}
+                                                    value={`${coveredCount}/${retell.keywords.length}`}
+                                                />
                                             </>
                                         )}
                                     </div>
                                 </div>
 
                                 <div className="mt-4 rounded-xl bg-muted/40 px-4 py-3">
-                                    {dictation && (
+                                    {resultWords.length > 0 ? (
                                         <p className="text-lg leading-8">
-                                            {dictation.words.map((word, index) => (
+                                            {resultWords.map((word, index) => (
                                                 <span
                                                     key={`${index}-${word.status}`}
                                                     title={word.status === 'mispronounced' && word.actual
@@ -581,25 +638,26 @@ export default function PracticePage() {
                                                 </span>
                                             ))}
                                         </p>
-                                    )}
-                                    {retell && (
-                                        <div className="flex flex-wrap gap-1.5">
-                                            {retell.keywords.map((keyword) => (
-                                                <span
-                                                    key={keyword.word}
-                                                    className={cn(
-                                                        'rounded-full px-2.5 py-1 text-xs',
-                                                        keyword.covered
-                                                            ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
-                                                            : 'bg-muted text-muted-foreground line-through',
-                                                    )}
-                                                >
-                                                    {keyword.word}
-                                                </span>
-                                            ))}
-                                        </div>
+                                    ) : (
+                                        <p className="text-sm text-muted-foreground">{t('practice.noRecognized')}</p>
                                     )}
                                 </div>
+
+                                {(grammarIssues.length > 0 || similarity !== null) && (
+                                    <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+                                        {similarity !== null && (
+                                            <span>{t('practice.similarity', { score: similarity })}</span>
+                                        )}
+                                        {grammarIssues.map((issue) => (
+                                            <span
+                                                key={issue}
+                                                className="rounded-md bg-amber-500/10 px-2 py-0.5 text-amber-700 dark:text-amber-300"
+                                            >
+                                                {issue}
+                                            </span>
+                                        ))}
+                                    </div>
+                                )}
 
                                 <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
                                     <span>{t('practice.reference')}</span>
@@ -609,6 +667,17 @@ export default function PracticePage() {
                                 {retell?.recognizedText && (
                                     <div className="mt-2 text-xs text-muted-foreground">
                                         {t('practice.recognized')}：{retell.recognizedText}
+                                    </div>
+                                )}
+
+                                {(dictation?.graderNote || retell?.graderNote) && (
+                                    <div className="mt-2 rounded-xl bg-sky-500/10 px-3 py-2 text-xs leading-5 text-sky-700 dark:text-sky-300">
+                                        {dictation?.graderNote ?? retell?.graderNote}
+                                    </div>
+                                )}
+                                {(dictation?.graderError || retell?.graderError) && (
+                                    <div className="mt-2 text-xs text-amber-600 dark:text-amber-400">
+                                        {t('practice.graderUnavailable')}：{dictation?.graderError ?? retell?.graderError}
                                     </div>
                                 )}
 
@@ -700,9 +769,9 @@ export default function PracticePage() {
                         </section>
                     </div>
 
-                    {/* 右侧：句子队列 */}
+                    {/* 右侧：句子队列（每句一条原声） */}
                     <aside className="flex min-w-0 flex-col gap-3">
-                        <section className="rounded-2xl border border-border/60 bg-card p-4 shadow-xs">
+                        <section className="flex flex-col rounded-2xl border border-border/60 bg-card p-3 shadow-xs">
                             <Button
                                 type="button"
                                 size="sm"
@@ -717,38 +786,74 @@ export default function PracticePage() {
                                     {queue.length === 0 ? '0/0' : `${cursor + 1}/${queue.length}`}
                                 </span>
                             </div>
-                            <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-muted">
+
+                            {queue.length === 0 ? (
+                                <p className="mt-3 rounded-xl border border-dashed border-border/60 px-3 py-6 text-center text-xs leading-5 text-muted-foreground">
+                                    {t('practice.queueEmptyShort')}
+                                </p>
+                            ) : (
                                 <div
-                                    className="h-full rounded-full bg-primary transition-all"
-                                    style={{
-                                        width: queue.length === 0
-                                            ? '0%'
-                                            : `${Math.round(((cursor + 1) / queue.length) * 100)}%`,
-                                    }}
-                                />
-                            </div>
-                            <div className="mt-3 flex gap-2">
-                                <Button
-                                    type="button"
-                                    size="sm"
-                                    variant="outline"
-                                    className="h-7 flex-1 rounded-lg px-2 text-xs"
-                                    disabled={queue.length === 0}
-                                    onClick={() => goTo(cursor - 1)}
+                                    ref={queueListRef}
+                                    className="mt-2 flex max-h-[520px] min-h-0 flex-col gap-1 overflow-y-auto pr-1"
                                 >
-                                    {t('practice.prevSentence')}
-                                </Button>
-                                <Button
-                                    type="button"
-                                    size="sm"
-                                    variant="outline"
-                                    className="h-7 flex-1 rounded-lg px-2 text-xs"
-                                    disabled={queue.length === 0}
-                                    onClick={goNext}
-                                >
-                                    {t('practice.nextSentence')}
-                                </Button>
-                            </div>
+                                    {queue.map((item, index) => (
+                                        <div
+                                            key={item.id}
+                                            data-current={index === cursor ? 'true' : undefined}
+                                            role="button"
+                                            tabIndex={0}
+                                            onClick={() => goTo(index)}
+                                            onKeyDown={(event) => {
+                                                if (event.key === 'Enter' || event.key === ' ') {
+                                                    event.preventDefault();
+                                                    goTo(index);
+                                                }
+                                            }}
+                                            className={cn(
+                                                'flex w-full cursor-pointer items-center gap-1.5 rounded-lg border px-2 py-1.5 transition-colors',
+                                                index === cursor
+                                                    ? 'border-amber-400/70 bg-amber-400/10'
+                                                    : 'border-transparent hover:bg-muted/60',
+                                            )}
+                                        >
+                                            <span className="w-4 shrink-0 text-right text-[10px] tabular-nums text-muted-foreground">
+                                                {index + 1}
+                                            </span>
+                                            <span className="flex h-5 flex-1 items-end gap-[2px] overflow-hidden">
+                                                {Array.from({ length: 14 }).map((_, bar) => (
+                                                    <span
+                                                        key={bar}
+                                                        className={cn(
+                                                            'w-[2px] rounded-full',
+                                                            rowPlayingId === item.id
+                                                                ? 'bg-sky-400'
+                                                                : 'bg-muted-foreground/25',
+                                                        )}
+                                                        style={{ height: 4 + ((index * 13 + bar * 7) % 12) }}
+                                                    />
+                                                ))}
+                                            </span>
+                                            <button
+                                                type="button"
+                                                aria-label={t('practice.playThisLine')}
+                                                onClick={(event) => {
+                                                    event.stopPropagation();
+                                                    void playRow(item);
+                                                }}
+                                                className="shrink-0 rounded-full p-1 text-muted-foreground transition-colors hover:bg-background hover:text-foreground"
+                                            >
+                                                {rowLoadingId === item.id ? (
+                                                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                                ) : rowPlayingId === item.id ? (
+                                                    <Square className="h-3.5 w-3.5 fill-current" />
+                                                ) : (
+                                                    <Play className="h-3.5 w-3.5" />
+                                                )}
+                                            </button>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
                         </section>
                     </aside>
                 </div>
@@ -770,10 +875,14 @@ function countStatus(result: DictationResult, status: ShadowingWordStatus): numb
  * 结果面板里的小指标。
  * @param props.label 指标名。
  * @param props.value 指标值。
+ * @param props.hint 悬停说明，用于解释「—」这类缺省值。
  */
-function Metric({ label, value }: { label: string; value: string }) {
+function Metric({ label, value, hint }: { label: string; value: string; hint?: string }) {
     return (
-        <div className="flex flex-col justify-center rounded-xl border border-border/50 bg-background/60 px-3 py-2">
+        <div
+            title={hint}
+            className="flex flex-col justify-center rounded-xl border border-border/50 bg-background/60 px-3 py-2"
+        >
             <span className="text-lg font-semibold tabular-nums text-foreground">{value}</span>
             <span className="mt-0.5 text-xs text-muted-foreground">{label}</span>
         </div>
