@@ -221,30 +221,23 @@ export const buildDialogueSystemPrompt = (params: {
 export const buildCorrectionPrompt = (params: {
     /** 学习者的英文原句。 */
     text: string;
-    /** 识别置信度低的词；打字输入时为空数组。 */
-    lowConfidenceWords: string[];
 }): string => {
-    const lowConfidence = params.lowConfidenceWords.filter((word) => word.trim().length > 0);
     return [
         '你在帮一位英语学习者检查他刚说出的一句英文。',
         '',
         `学习者原句：「${params.text}」`,
         '',
-        '# 你可以指出三类问题',
+        '# 你可以指出两类问题',
         '1. grammar：真实的语法错误（时态、主谓一致、单复数、冠词、介词、词序等）。',
         '2. wording：不算错但不够自然的地道表达，给出更常用的说法。',
-        '3. pronunciation：**只能**针对下面列出的词，说明"识别没把握，可能没读清，建议重读"。',
         '',
-        lowConfidence.length > 0
-            ? `识别置信度低的词：${lowConfidence.join('、')}`
-            : '识别置信度低的词：（无。这句话是打字输入的，或每个词都识别得很清楚——**不要输出任何 pronunciation 类意见**。）',
+        '发音不归你判断——识别引擎会单独给出"没读清"的词，不要输出任何发音类意见。',
         '',
         '# 规则',
         '- original 必须照抄学习者原句里的片段，不能改写、不能引用别人的话。',
         '- better 必须是英文，且与 original 不同。',
         '- whyZh 用一句中文说明原因，面向初学者，不堆术语。',
         '- 最多 3 条意见，按重要性排序；没有问题时 items 为空数组。',
-        '- pronunciation 类最多 2 条，且只能出现在上面列出的词里。',
         '- 不要评价口音、语调、语速，不要给分。',
         '- corrected 是整句改写后的版本；没有需要改的地方就与原文完全相同。',
         '',

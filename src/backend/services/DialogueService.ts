@@ -44,6 +44,7 @@ import {
     type DialogueCorrectTurnResult,
     type DialogueCorrection,
     type DialogueCorrectionDraft,
+    type DialogueCorrectionItem,
 } from '@/common/contracts/dialogue';
 import { normalizeShadowingSource } from '@/backend/services/shadowing/ShadowingSource';
 import { normalizeWord, tokenizeForScoring } from '@/common/utils/wordTokens';
@@ -663,7 +664,7 @@ export class DialogueServiceImpl implements DialogueService {
         lowConfidenceWords: string[];
         backend: DialogueModelBackend;
     }): Promise<DialogueCorrection> {
-        const prompt = buildCorrectionPrompt(params);
+        const prompt = buildCorrectionPrompt({ text: params.text });
         if (params.backend === 'local') {
             const modelId = await this.localAiService.getActiveModelId();
             const raw = await this.localAiService.generate(
@@ -706,24 +707,20 @@ export class DialogueServiceImpl implements DialogueService {
         reviewer: DialogueCorrection['reviewer'],
     ): DialogueCorrection {
         const sentence = normalizePhrase(params.text);
-        const lowConfidence = params.lowConfidenceWords.map(normalizePhrase).filter((word) => word.length > 0);
         const seen = new Set<string>();
-        const items = draft.items.filter((item) => {
+        // 语法与用词：只留真实的模型意见；原句片段必须能在学习者原句里找到
+        const modelItems = draft.items.filter((item) => {
+            if (item.kind === 'pronunciation') {
+                // 发音不交给模型：它会时有时无，而且本就没有判断依据
+                return false;
+            }
             const original = normalizePhrase(item.original);
             const better = normalizePhrase(item.better);
             if (original.length === 0 || original === better) {
                 return false;
             }
-            // 原句片段必须能在学习者原句里找到，避免模型引用别的句子
             if (!sentence.includes(original)) {
                 return false;
-            }
-            if (item.kind === 'pronunciation') {
-                // 发音类必须落在低置信度词上，否则就是编的
-                const grounded = lowConfidence.some((word) => word.includes(original) || original.includes(word));
-                if (!grounded) {
-                    return false;
-                }
             }
             const key = `${item.kind}:${original}`;
             if (seen.has(key)) {
@@ -731,12 +728,29 @@ export class DialogueServiceImpl implements DialogueService {
             }
             seen.add(key);
             return true;
-        }).slice(0, MAX_CORRECTION_ITEMS);
-        if (items.length !== draft.items.length) {
+        });
+        // 发音：直接由识别引擎给出的低置信度词生成，确定、可复现，不经过模型
+        const pronunciationItems: DialogueCorrectionItem[] = [];
+        const seenWords = new Set<string>();
+        for (const word of params.lowConfidenceWords) {
+            const trimmed = word.trim();
+            if (!trimmed || seenWords.has(trimmed.toLowerCase()) || pronunciationItems.length >= 2) {
+                continue;
+            }
+            seenWords.add(trimmed.toLowerCase());
+            pronunciationItems.push({
+                kind: 'pronunciation',
+                original: trimmed,
+                better: trimmed,
+                whyZh: '识别没把握，可能没读清，建议再读一遍。',
+            });
+        }
+        const items = [...modelItems, ...pronunciationItems].slice(0, MAX_CORRECTION_ITEMS);
+        if (items.length !== draft.items.length + pronunciationItems.length) {
             this.logger.info('dialogue correction filtered', {
-                total: draft.items.length,
-                kept: items.length,
-                lowConfidenceCount: lowConfidence.length,
+                modelTotal: draft.items.length,
+                modelKept: modelItems.length,
+                pronunciationAdded: pronunciationItems.length,
             });
         }
         return {
