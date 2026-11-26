@@ -28,6 +28,28 @@ Watch → hear a line → shadow → word-level feedback → save
 
 Every item points back to `videoKey + sentenceIndex`, so the original context is never lost.
 
+### One engine, five views
+
+These pages are not five products; they are five tasks on one engine:
+
+```text
+sentence (videoKey + sentenceIndex)
+  → play audio → record → local ASR → word alignment → score
+  → store attempt → (optionally) schedule a review card
+```
+
+What changes per page is the **task** and therefore the **scoring rule**:
+
+| Page | Task | How it is judged |
+|---|---|---|
+| Shadowing | say the line after hearing it | word-by-word against the line |
+| Spaced review | say it again when due | same word-by-word score; pass moves the card forward |
+| Dictation | type what you hear | word-by-word against the line |
+| Retell | say it in your own words | keyword coverage, not exact wording |
+| Scene dialogue | say your part in a scripted conversation | per-line correction (wording / grammar / pronunciation), script followed line by line |
+
+If two of these feel identical to you, that is useful feedback: it means the task does not differ enough to justify its own page. That is the next thing being fixed.
+
 ## What this fork adds
 
 | Area | What it does |
@@ -36,7 +58,7 @@ Every item points back to `videoKey + sentenceIndex`, so the original context is
 | **Spaced Review** | Review means listening and shadowing again. The backend reads the real attempt score; a pass postpones the card (1/3/7/14/30 days), a fail returns it immediately. |
 | **Dashboard** | Today’s practice (shadowing + dictation/retell + dialogue turns), streak, 7-day activity. |
 | **Dictation & Retell** | Word-by-word dictation check; retelling scored by keyword coverage, not exact wording. |
-| **Scene Dialogue** | Builds a role-play from the current line, lets you speak or type, then produces specific feedback. Good lines go into the same review queue. |
+| **Scene Dialogue** | Rehearses the clip's own dialogue. The whole subtitle track becomes a script rail; the AI speaks the next original line (it does not invent lines), the learner says their part, each line is spoken before the next appears, and every learner line gets a per-line correction card. Review at the end; good lines go into the same queue. |
 | **Local-first models** | Dialogue can run on the bundled Qwen3.5 2B (offline) or any OpenAI-compatible endpoint (cloud or local Ollama). The UI always shows which model produced the feedback. |
 
 ### Three evaluation layers (and what is deliberately missing)
@@ -55,8 +77,10 @@ There is **no phoneme, stress, or intonation score** for free speech. The local 
 | Word-level shadowing feedback | Spaced review driven by a real score |
 | ![Dictation](docs/screenshots/05-dictation.png) | ![Retell](docs/screenshots/06-retell.png) |
 | Dictation check | Retelling by keyword coverage |
-| ![Dialogue](docs/screenshots/08-dialogue-scene.png) | ![Dialogue review](docs/screenshots/10-dialogue-review.png) |
-| Scene generated from the current line | Review: stats, line feedback, good lines |
+| ![Dialogue](docs/screenshots/08-dialogue-scene.png) | ![Dialogue correction](docs/screenshots/09-dialogue-chat.png) |
+| Rehearsing the clip line by line | Per-line correction under the learner's line |
+| ![Dialogue review](docs/screenshots/10-dialogue-review.png) | ![Dialogue setup](docs/screenshots/07-dialogue-setup.png) |
+| Review: stats, line feedback, good lines | Setup: script rail, roles, difficulty |
 | ![Dashboard](docs/screenshots/11-dashboard.png) | ![Player](docs/screenshots/01-player.png) |
 | Dashboard | The player and the current line |
 
@@ -71,7 +95,7 @@ Renderer (React features)
 - Front end: `src/fronted/features/<domain>/`
 - Back end: `controllers / services / infrastructure / ioc`
 - Contracts: `src/common/contracts/**`, `src/common/api/api-def.ts`
-- SQLite + Drizzle; migrations `0007`–`0010` add the learning tables.
+- SQLite + Drizzle; migrations `0007`–`0012` add the learning tables.
 - Shared engines: tokenization, word alignment, sentence audio, recorded speech, recorder hook, local-model adapter.
 
 ## Quick start
@@ -109,7 +133,7 @@ corepack yarn package
 
 ## Project status
 
-- Baseline tag: `portfolio-p5`.
+- Baseline tag: `portfolio-p6`.
 - All five learning stages are implemented and tested end-to-end on Windows.
 - The local 2B model can run offline but gives weaker scene relevance and feedback than cloud models; the UI labels the reviewing model.
 - Not tested on macOS/Linux in this fork; the upstream project supports them.
@@ -128,8 +152,10 @@ corepack yarn package
 
 这是 [DashPlayer](https://github.com/solidSpoon/DashPlayer) 的英语学习修改版，以“视频句”为唯一学习单元，串起跟读打分、间隔复习、听写复述、场景对话与学习台。
 
+- 五个页面共用一套引擎（取句 → 播/录 → 本地识别 → 逐词对齐 → 打分 → 进复习队列），区别在任务与判定规则；任务形态不够区分的地方，会合并而不是再开一个页面。
+- 场景对话照原片台词逐句演：AI 念剧本原句而不是自由发挥，一句读完才出下一句，每句下方给纠错卡。
 - 评分只做词级，不做假音素级；对话点评标注模型来源，不冒充考试分数。
 - 对话模型可切换内置本地模型（离线）或 OpenAI 兼容接口。
 - 代码基于 AGPL-3.0 开源；影视素材仅本地演示，不随仓库分发。
 
-详见 [`docs/开发流程说明-中文.md`](docs/开发流程说明-中文.md)（如果随仓库提供）。
+构建与验证命令见上文 Quick start；数据表与迁移见 `drizzle/`。
