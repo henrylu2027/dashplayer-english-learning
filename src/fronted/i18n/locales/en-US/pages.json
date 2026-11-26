@@ -416,6 +416,8 @@
         "yourLine": "Your line",
         "youPlay": "You play {{name}}",
         "swapRoles": "Swap roles",
+        "railShow": "Transcript",
+        "railHide": "Hide transcript",
         "scriptFullRange": "{{count}} lines in the clip · rehearsal starts at line {{start}}",
         "scriptPlaying": "The other character is speaking…",
         "scriptDone": "That's the whole exchange — finish and review",

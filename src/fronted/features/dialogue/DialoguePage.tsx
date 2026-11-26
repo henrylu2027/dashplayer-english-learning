@@ -76,6 +76,8 @@ export default function DialoguePage() {
     const [roleAName, setRoleAName] = useState('');
     const [roleBName, setRoleBName] = useState('');
     const [learnerRole, setLearnerRole] = useState<DialogueSpeaker>('a');
+    /** 右侧原片台词面板是否展开。 */
+    const [railOpen, setRailOpen] = useState(true);
     /** 只在首次拿到可用性时选默认后端，之后不覆盖用户的选择。 */
     const backendInitializedRef = useRef(false);
 
@@ -335,7 +337,7 @@ export default function DialoguePage() {
             return (
                 <div className={cn(
                     'grid min-h-0 gap-4',
-                    detail.script && 'lg:grid-cols-[minmax(0,1fr)_320px]',
+                    detail.script && railOpen && 'lg:grid-cols-[minmax(0,1fr)_320px]',
                 )}>
                     <div className="flex min-w-0 flex-col gap-4">
                     <section className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-border/60 bg-card px-4 py-3 shadow-xs">
@@ -347,16 +349,29 @@ export default function DialoguePage() {
                                 {t('dialogue.historyTurns', { count: historyDetail.session.turnCount })}
                             </div>
                         </div>
-                        <Button
-                            type="button"
-                            size="sm"
-                            variant="outline"
-                            className="h-8 rounded-lg px-3 text-xs"
-                            onClick={resetToSetup}
-                        >
-                            <ArrowLeft className="mr-1 h-3.5 w-3.5" />
-                            {t('dialogue.back')}
-                        </Button>
+                        <div className="flex items-center gap-1">
+                            {detail.script && !railOpen && (
+                                <Button
+                                    type="button"
+                                    size="sm"
+                                    variant="ghost"
+                                    className="h-8 rounded-lg px-2 text-xs"
+                                    onClick={() => setRailOpen(true)}
+                                >
+                                    {t('dialogue.railShow')}
+                                </Button>
+                            )}
+                            <Button
+                                type="button"
+                                size="sm"
+                                variant="outline"
+                                className="h-8 rounded-lg px-3 text-xs"
+                                onClick={resetToSetup}
+                            >
+                                <ArrowLeft className="mr-1 h-3.5 w-3.5" />
+                                {t('dialogue.back')}
+                            </Button>
+                        </div>
                     </section>
                     <SceneCardView scene={historyDetail.scene} onSpeak={speak} />
                     <section className="flex flex-col gap-2 rounded-2xl border border-border/60 bg-card p-5 shadow-xs">
@@ -391,11 +406,12 @@ export default function DialoguePage() {
                         </section>
                     )}
                     </div>
-                    {detail.script && (
+                    {detail.script && railOpen && (
                         <div className="min-h-0 lg:sticky lg:top-0 lg:max-h-[calc(100vh-180px)]">
                             <ClipTranscriptRail
                                 script={detail.script}
                                 focusIndex={detail.turns.filter((turn) => turn.role === 'user').length}
+                                onCollapse={() => setRailOpen(false)}
                             />
                         </div>
                     )}
@@ -440,9 +456,22 @@ export default function DialoguePage() {
         return (
             <div className={cn(
                 'grid min-h-0 gap-4',
-                script && 'lg:grid-cols-[minmax(0,1fr)_320px]',
+                script && railOpen && 'lg:grid-cols-[minmax(0,1fr)_320px]',
             )}>
                 <div className="flex min-w-0 flex-col gap-4">
+                {script && !railOpen && (
+                    <div className="flex justify-end">
+                        <Button
+                            type="button"
+                            size="sm"
+                            variant="ghost"
+                            className="h-7 rounded-lg px-2 text-xs"
+                            onClick={() => setRailOpen(true)}
+                        >
+                            {t('dialogue.railShow')}
+                        </Button>
+                    </div>
+                )}
                 {error && (
                     <div className="rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-500">
                         {error}
@@ -466,9 +495,13 @@ export default function DialoguePage() {
                     onCreate={() => void handleCreate()}
                 />
                 </div>
-                {script && (
+                {script && railOpen && (
                     <div className="min-h-0 lg:sticky lg:top-0 lg:max-h-[calc(100vh-180px)]">
-                        <ClipTranscriptRail script={script} focusIndex={0} />
+                        <ClipTranscriptRail
+                            script={script}
+                            focusIndex={0}
+                            onCollapse={() => setRailOpen(false)}
+                        />
                     </div>
                 )}
             </div>

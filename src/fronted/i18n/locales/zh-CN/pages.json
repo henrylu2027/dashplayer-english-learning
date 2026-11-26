@@ -416,6 +416,8 @@
         "yourLine": "轮到你说",
         "youPlay": "你演 {{name}}",
         "swapRoles": "互换角色",
+        "railShow": "原片台词",
+        "railHide": "收起台词",
         "scriptFullRange": "全片 {{count}} 句 · 从第 {{start}} 句开始演",
         "scriptPlaying": "对方正在说下一句…",
         "scriptDone": "这段台词演完了，可以结束并复盘",

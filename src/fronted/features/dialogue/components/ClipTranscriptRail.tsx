@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
+import { ChevronsRight } from 'lucide-react';
 
 import type { DialogueScript, DialogueSpeaker } from '@/common/contracts/dialogue';
 import { cn } from '@/fronted/lib/utils';
@@ -13,13 +14,16 @@ import { cn } from '@/fronted/lib/utils';
  *
  * @param props.script 剧本。
  * @param props.focusIndex 当前演到第几句；高亮并滚到这一句。
+ * @param props.onCollapse 收起面板；不传时不显示收起按钮。
  */
 export default function ClipTranscriptRail({
     script,
     focusIndex: rawFocusIndex,
+    onCollapse,
 }: {
     script: DialogueScript;
     focusIndex: number;
+    onCollapse?: () => void;
 }) {
     const { t } = useTranslation('pages');
     const listRef = useRef<HTMLDivElement | null>(null);
@@ -48,15 +52,28 @@ export default function ClipTranscriptRail({
 
     return (
         <aside className="flex min-h-0 select-text flex-col rounded-2xl border border-border/60 bg-card shadow-xs">
-            <div className="border-b border-border/50 px-4 py-3">
-                <div className="text-sm font-medium text-foreground">{t('dialogue.scriptTitle')}</div>
-                <div className="mt-0.5 text-xs text-muted-foreground">
-                    {t('dialogue.scriptRange', {
-                        start: script.lines[0]?.index ?? script.startIndex,
-                        end: script.endIndex,
-                        count: script.lines.length,
-                    })}
+            <div className="flex items-start justify-between gap-2 border-b border-border/50 px-4 py-3">
+                <div className="min-w-0">
+                    <div className="text-sm font-medium text-foreground">{t('dialogue.scriptTitle')}</div>
+                    <div className="mt-0.5 text-xs text-muted-foreground">
+                        {t('dialogue.scriptRange', {
+                            start: script.lines[0]?.index ?? script.startIndex,
+                            end: script.endIndex,
+                            count: script.lines.length,
+                        })}
+                    </div>
                 </div>
+                {onCollapse && (
+                    <button
+                        type="button"
+                        onClick={onCollapse}
+                        aria-label={t('dialogue.railHide')}
+                        title={t('dialogue.railHide')}
+                        className="mt-0.5 shrink-0 rounded-md p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                    >
+                        <ChevronsRight className="h-4 w-4" />
+                    </button>
+                )}
             </div>
             <div ref={listRef} className="min-h-0 flex-1 overflow-y-auto px-3 py-3">
                 <div className="flex flex-col gap-2">

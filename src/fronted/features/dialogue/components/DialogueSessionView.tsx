@@ -110,6 +110,8 @@ export default function DialogueSessionView({
     const [finishing, setFinishing] = useState(false);
     /** 学习者扮演哪一方；可以在对话中随时互换。 */
     const [learnerRole, setLearnerRole] = useState<DialogueSpeaker>(script?.learnerRole ?? 'a');
+    /** 右侧台词面板是否展开。 */
+    const [railOpen, setRailOpen] = useState(true);
     const bottomRef = useRef<HTMLDivElement | null>(null);
     /** 已经落库的行，避免 effect 重跑时重复写入。 */
     const persistedRef = useRef<Set<string>>(new Set());
@@ -133,6 +135,13 @@ export default function DialogueSessionView({
     const currentLine = cursor < lines.length ? lines[cursor] : null;
     const waitingForLearner = currentLine?.speaker === learnerRole;
     const finishedScript = lines.length > 0 && cursor >= lines.length;
+    /**
+     * 右侧轨道高亮哪一句。
+     *
+     * 谁说到哪一句就亮哪一句：AI 说完停在它那句，学习者说完停在他说那句；
+     * 开始前停在本场第一句。这样右边始终对应"刚才在演的那句"。
+     */
+    const [activeLineIndex, setActiveLineIndex] = useState(startPosition);
 
     // 轮到 AI：停顿一下，把下一句原台词说出来并落库
     useEffect(() => {
@@ -146,6 +155,8 @@ export default function DialogueSessionView({
         const timer = setTimeout(() => {
             const id = `ai-${cursor}`;
             setItems((previous) => [...previous, { id, role: 'assistant', text: line.en, hintZh: line.zh }]);
+            // 右侧停在这句：AI 正在说的就是它
+            setActiveLineIndex(cursor);
             setCursor((value) => value + 1);
             // 台词出现的同一时刻读出来
             enqueueSpeech(line.en);
@@ -191,6 +202,8 @@ export default function DialogueSessionView({
         }]);
         // 学习者这句也读一遍：作为标准发音示范
         enqueueSpeech(text);
+        // 右侧停到学习者刚说的那句
+        setActiveLineIndex(cursor);
         // 说一句就往下走一句，不卡在学习者这一轮
         setCursor((value) => value + 1);
         setCorrectingUserIndex(userIndex);
@@ -242,15 +255,28 @@ export default function DialogueSessionView({
                     <div className="text-xs text-muted-foreground">
                         {t('dialogue.youPlay', { name: learnerRole === 'a' ? script.roleAName : script.roleBName })}
                     </div>
-                    <Button
-                        type="button"
-                        size="sm"
-                        variant="ghost"
-                        className="h-7 rounded-lg px-2 text-xs"
-                        onClick={() => setLearnerRole((current) => (current === 'a' ? 'b' : 'a'))}
-                    >
-                        {t('dialogue.swapRoles')}
-                    </Button>
+                    <div className="flex items-center gap-1">
+                        {!railOpen && (
+                            <Button
+                                type="button"
+                                size="sm"
+                                variant="ghost"
+                                className="h-7 rounded-lg px-2 text-xs"
+                                onClick={() => setRailOpen(true)}
+                            >
+                                {t('dialogue.railShow')}
+                            </Button>
+                        )}
+                        <Button
+                            type="button"
+                            size="sm"
+                            variant="ghost"
+                            className="h-7 rounded-lg px-2 text-xs"
+                            onClick={() => setLearnerRole((current) => (current === 'a' ? 'b' : 'a'))}
+                        >
+                            {t('dialogue.swapRoles')}
+                        </Button>
+                    </div>
                 </div>
                 <div className="flex flex-col gap-3">
                     {items.map((item) => (
@@ -344,11 +370,20 @@ export default function DialogueSessionView({
     );
 
     return (
-        <div className="grid min-h-0 gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
+        <div className={cn(
+            'grid min-h-0 gap-4',
+            railOpen && 'lg:grid-cols-[minmax(0,1fr)_320px]',
+        )}>
             {conversationPane}
-            <div className="min-h-0 lg:sticky lg:top-0 lg:max-h-[calc(100vh-180px)]">
-                <ClipTranscriptRail script={script} focusIndex={cursor} />
-            </div>
+            {railOpen && (
+                <div className="min-h-0 lg:sticky lg:top-0 lg:max-h-[calc(100vh-180px)]">
+                    <ClipTranscriptRail
+                        script={script}
+                        focusIndex={activeLineIndex}
+                        onCollapse={() => setRailOpen(false)}
+                    />
+                </div>
+            )}
         </div>
     );
 }
