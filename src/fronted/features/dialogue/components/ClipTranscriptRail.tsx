@@ -12,19 +12,19 @@ import { cn } from '@/fronted/lib/utils';
  * 目前还没有做到「这一轮对应哪一条台词」（第二期接逐句纠错时一起做）。
  *
  * @param props.script 剧本。
- * @param props.userTurnCount 学习者已发言轮数，用于推进滚动位置。
+ * @param props.focusIndex 当前演到第几句；高亮并滚到这一句。
  */
 export default function ClipTranscriptRail({
     script,
-    userTurnCount,
+    focusIndex: rawFocusIndex,
 }: {
     script: DialogueScript;
-    userTurnCount: number;
+    focusIndex: number;
 }) {
     const { t } = useTranslation('pages');
     const listRef = useRef<HTMLDivElement | null>(null);
-    /** 当前高亮的台词下标：随学习者发言推进，最多停在最后一句。 */
-    const focusIndex = Math.min(Math.max(userTurnCount, 0), Math.max(script.lines.length - 1, 0));
+    /** 当前高亮的台词下标；超出范围时停在最后一句。 */
+    const focusIndex = Math.min(Math.max(rawFocusIndex, 0), Math.max(script.lines.length - 1, 0));
 
     useEffect(() => {
         const list = listRef.current;

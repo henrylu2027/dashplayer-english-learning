@@ -413,6 +413,10 @@
         "correctionClean": "No issues found in this line",
         "correctionPending": "Checking this line…",
         "correctionBy": "Checked by {{backend}} · {{model}}",
+        "yourLine": "Your line",
+        "scriptPlaying": "The other character is speaking…",
+        "scriptDone": "That's the whole exchange — finish and review",
+        "scriptMissing": "This conversation has no script (created by an older version)",
         "difficultyTitle": "Difficulty",
         "difficulty": {
             "basic": "Starter",

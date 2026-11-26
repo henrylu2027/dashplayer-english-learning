@@ -403,7 +403,7 @@ export default function DialoguePage() {
                         <div className="min-h-0 lg:sticky lg:top-0 lg:max-h-[calc(100vh-180px)]">
                             <ClipTranscriptRail
                                 script={detail.script}
-                                userTurnCount={detail.turns.filter((turn) => turn.role === 'user').length}
+                                focusIndex={detail.turns.filter((turn) => turn.role === 'user').length}
                             />
                         </div>
                     )}
@@ -446,7 +446,11 @@ export default function DialoguePage() {
             );
         }
         return (
-            <>
+            <div className={cn(
+                'grid min-h-0 gap-4',
+                script && 'lg:grid-cols-[minmax(0,1fr)_320px]',
+            )}>
+                <div className="flex min-w-0 flex-col gap-4">
                 {error && (
                     <div className="rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-500">
                         {error}
@@ -469,7 +473,13 @@ export default function DialoguePage() {
                     onBackendChange={setBackend}
                     onCreate={() => void handleCreate()}
                 />
-            </>
+                </div>
+                {script && (
+                    <div className="min-h-0 lg:sticky lg:top-0 lg:max-h-[calc(100vh-180px)]">
+                        <ClipTranscriptRail script={script} focusIndex={0} />
+                    </div>
+                )}
+            </div>
         );
     };
 

@@ -413,6 +413,10 @@
         "correctionClean": "这句没发现问题",
         "correctionPending": "正在检查这句…",
         "correctionBy": "纠错模型：{{backend}} · {{model}}",
+        "yourLine": "轮到你说",
+        "scriptPlaying": "对方正在说下一句…",
+        "scriptDone": "这段台词演完了，可以结束并复盘",
+        "scriptMissing": "这条对话没有剧本（旧版创建），无法继续演下去",
         "difficultyTitle": "难度",
         "difficulty": {
             "basic": "入门",
