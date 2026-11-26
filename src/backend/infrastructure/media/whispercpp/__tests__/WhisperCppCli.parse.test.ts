@@ -39,10 +39,24 @@ describe('whisper.cpp 输出解析', () => {
 
         expect(result.text).toBe(JFK_STDOUT.trim());
         expect(result.tokens).toEqual([
-            { text: ' And', start: 0.24, end: 0.56 },
-            { text: ' so', start: 0.56, end: 0.88 },
-            { text: ',', start: 0.88, end: 0.88 },
+            { text: ' And', start: 0.24, end: 0.56, probability: 0.9996 },
+            { text: ' so', start: 0.56, end: 0.88, probability: 0.9999 },
+            { text: ',', start: 0.88, end: 0.88, probability: 0.852 },
         ]);
+    });
+
+    it('解析每个子词的概率；没有概率字段时缺省而不是猜一个值', () => {
+        const withProbability = parseWhisperCppOutput(
+            'text',
+            '  [ 0] id= 1976 frame=  3 dur_idx= 4 dur_val= 4 p=0.6508 plog=-0.4295 t0=  32 t1=  40 word_start=true "▁R"',
+        );
+        expect(withProbability.tokens[0].probability).toBeCloseTo(0.6508, 4);
+
+        const withoutProbability = parseWhisperCppOutput(
+            'text',
+            '  [ 0] id= 1976 frame=  3 dur_idx= 4 dur_val= 4 t0=  32 t1=  40 word_start=true "▁R"',
+        );
+        expect(withoutProbability.tokens[0].probability).toBeUndefined();
     });
 
     it('时间戳按 10ms 单位换算为秒', () => {
@@ -93,8 +107,8 @@ describe('whisper.cpp 输出解析', () => {
         const result = parseWhisperCppOutput('He said', stderr);
 
         expect(result.tokens).toEqual([
-            { text: ' He', start: 53.68, end: 53.76 },
-            { text: ' said', start: 53.84, end: 54.0 },
+            { text: ' He', start: 53.68, end: 53.76, probability: 0.99 },
+            { text: ' said', start: 53.84, end: 54.0, probability: 0.98 },
         ]);
     });
 });
