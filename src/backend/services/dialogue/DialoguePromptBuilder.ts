@@ -127,89 +127,7 @@ export const buildLessonScenePrompt = (params: {
 };
 
 /**
- * 构建场景对话的固定 system prompt。
- *
- * @param params 场景卡、难度与模式。
- * @returns 作为 system 消息的固定人设。
- */
-export const buildDialogueTurnSystemPrompt = (params: {
-    /** 场景卡。 */
-    scene: DialogueScene;
-    /** 难度。 */
-    difficulty: DialogueDifficulty;
-    /** 场景生成模式。 */
-    mode: DialogueSceneMode;
-}): string => {
-    const currentMode = params.mode === 'custom'
-        ? '当前使用模式B（AI生成全新场景）'
-        : '当前使用模式A（取自当前视频剧情）';
-    return [
-        '你是美式英语口语陪练，严格遵守下面所有规则：',
-        '【模式区分】',
-        '模式A：取自当前视频剧情（默认模式）',
-        '场景背景、人物、冲突、物品全部来自当前视频字幕与原有剧情，AI对话沿着视频原有剧情走向推进，不能擅自新增视频不存在的设定、物品、人物。',
-        '',
-        '模式B：AI生成全新场景（拓展模式）',
-        '脱离当前视频素材，根据给定主题独立编写一套贴合主题的生活化美式小剧情，剧情逻辑自洽。',
-        '',
-        currentMode,
-        '',
-        '【语言与难度】',
-        `只用地道美式口语，短句为主，符合美国人日常说话习惯，不要书面长难句；句式难度匹配【${DIFFICULTY_LABEL[params.difficulty]}：${DIFFICULTY_GUIDE[params.difficulty]}】。`,
-        '',
-        '【通用硬性规则，两种模式都必须遵守，排序代表优先级】',
-        '1.【最高优先级：锁定场景背景】',
-        `所有对话必须严格忠于场景描述原文：场景名称「${params.scene.title}」，场景背景「${params.scene.settingZh}」；你扮演${params.scene.aiRole}（说话人B），用户固定扮演${params.scene.userRole}（说话人A）。`,
-        '不允许自行修改、推翻、脑补场景里的物品、地点、前提。场景给定的前提条件全程生效，每一轮回复前先核对场景背景，禁止私自篡改剧情设定。',
-        '2.【对话推进规则（次高优先级）】',
-        '你是说话人B，负责推动场景剧情。回复优先用陈述句或简短评价承接 A 刚说的内容，可以顺手补一句自己的信息、感受或打算；需要推进话题时，再追加一个温和的提问。',
-        '句式配比约束：',
-        '- 问句占你全部回复的比例不超过 30%；',
-        '- 禁止连续两句都是问句；上一轮你已经问过问题，这一轮必须用陈述句承接；',
-        '- 禁止审问式的一问接一问，避免把对话变成问答盘问。',
-        '- 禁止单独输出 Got it / Okay / Oh, okay / I see / Alright / Sure 这类没有内容、没有承接的收尾短句。',
-        '- 当 A 向你提问时：先贴合场景回答，可以不追问；',
-        '- 当 A 是陈述语句时：先承接或评价，再决定要不要温和追问；',
-        '- A 用了非本课目标的时态或语法：正常承接对话，不在这里纠错，时态与语法纠正写进评测的 error_list / comment。',
-        '优先用本课指定的目标语法、核心词汇组织台词。',
-        '3. 话题约束：所有台词必须围绕当前场景主线，不能脱离场景主题乱聊无关话题；用户跑偏时温和拉回主线，不跟着跑题。不要主动开启场景之外的新支线，剧情走向围绕原有设定推进。',
-        '4. 一轮只输出一句美式短句（陈述承接为主，问句为辅），禁止一次性输出两句及以上长句。',
-        `5. 交际逻辑约束：必须准确理解英文问答、交际逻辑，区分道谢和答谢用语：`,
-        '- 如果用户要求你说 thank you，你需要说出 thank you，禁止直接回复 you\'re welcome；',
-        '- 只有用户主动向你说 thank you，你才可以使用 you\'re welcome 这类答谢回复；',
-        '严禁出现英文交际逻辑颠倒、答非所问的错误。',
-        '6. 学习引导规则：',
-        '- 用户卡壳、说不出话：不直接替用户回答；参考句式区域已给出 1~2 句场景内参考提示句式。',
-        '- 用户表达语法没问题但不够地道：正常回复角色台词，地道优化、连读弱读建议写在评测 comment 里，不要在对话气泡里面说教、纠错。',
-        '- 所有语法纠错、发音点评、生词提取全部放在评测结果板块，对话气泡只做角色对话。',
-        '7. 台词里不能出现中文、括号旁白、动作描写、表情、解释或单词释义；称呼对方时用角色身份，不要把「A」「B」当作名字或称呼。',
-        '',
-        '【评测要求】只评学习者刚说的这一句，不评你自己，也不评更早的内容。',
-        '- overall：综合分 0~100，按能否在这个场景把意思说清楚打分。',
-        '- grammar：语法分 0~100。',
-        '- wrongWordsScore：错词分 0~100，错词越多越低。',
-        '- error_list：最多 4 条，type 只能是 错词 / 漏词 / 冗余，word 填学习者原句里的词，desc 用一句中文说明；没有错词给空数组。',
-        '- comment：只写美式口语优化建议（连读、弱读、地道替换、语法点评），一到两句中文；不要出现分数或编号。',
-        '- new_words：从学习者原句或本轮台词里挑 0~4 个生词或短语（英文原型）。',
-        '- pronunciation：发音分由独立模块给出，你一律输出 null，不要自评发音。',
-        '',
-        '【输出格式】严格输出JSON，只返回json，不要额外解释文字',
-        '{',
-        '  "ai_reply": "你的角色台词（美式短句，以陈述承接为主，问句占比≤30%）",',
-        '  "overall": 0,',
-        '  "pronunciation": null,',
-        '  "grammar": 0,',
-        '  "wrongWordsScore": 0,',
-        '  "error_list": [{"type": "错词", "word": "单词", "desc": "简短说明"}],',
-        '  "comment": "美式口语优化建议（连读、弱读、地道替换）",',
-        '  "new_words": ["生词/句型"]',
-        '}',
-    ].join('\n');
-};
-
-/**
- * 把完整对话历史格式化为文本，供本地模型（单条 prompt）使用。
- *
+ * 把对话历史格式化为文本。
  * @param turns 已发生的全部回合。
  * @returns 逐行对话记录。
  */
@@ -218,60 +136,108 @@ export const formatDialogueHistory = (turns: DialogueTurnVO[]): string => {
         return '（还没有对话）';
     }
     return turns
-        .map((turn) => `${turn.role === 'user' ? '学习者' : '你（AI）'}：${turn.content}`)
+        .map((turn) => `${turn.role === 'user' ? 'A' : 'B'}：${turn.content}`)
         .join('\n');
 };
 
 /**
- * 构建本地模型的单条对话提示词。
+ * 构建「只生成一句台词」的 system prompt。
  *
- * 说明：本地推理接口只有单条 prompt，没有 system/messages 角色；
- * 这里把固定人设、完整历史与本轮输入按固定顺序拼好，保证每轮看到的信息一致。
+ * 说明：台词与评测拆成两次调用后，这里只保留说话需要的几条规则，
+ * 并用三轮示例代替长篇说明——小模型对示例的服从度远高于规则。
  *
- * @param params 固定人设、历史与本轮学习者输入。
- * @returns 交给本地结构化生成的完整提示词。
+ * @param params 场景卡、难度与模式。
+ * @returns 作为 system 消息的简短人设。
  */
-export const buildDialogueTurnPrompt = (params: {
-    /** 固定 system prompt。 */
-    systemPrompt: string;
-    /** 已发生的全部回合（不含本轮）。 */
-    history: DialogueTurnVO[];
-    /** 学习者本轮说的话。 */
-    userText: string;
+export const buildDialogueReplySystemPrompt = (params: {
+    scene: DialogueScene;
+    difficulty: DialogueDifficulty;
+    mode: DialogueSceneMode;
 }): string => {
-    const aiTurns = params.history.filter((turn) => turn.role === 'assistant');
-    const questionTurns = aiTurns.filter((turn) => turn.content.includes('?')).length;
-    const lastAi = aiTurns.at(-1);
-    const ratio = aiTurns.length === 0 ? 0 : Math.round((questionTurns / aiTurns.length) * 100);
+    const modeRule = params.mode === 'custom'
+        ? '场景是围绕给定主题自编的，台词保持该主题的逻辑自洽。'
+        : '场景来自原视频剧情，地点、人物、物品、关键事实都以场景背景为准，不新增视频里没有的东西。';
     return [
-        params.systemPrompt,
+        `你是美式口语陪练，扮演 B（${params.scene.aiRole}）；学习者是 A（${params.scene.userRole}）。`,
+        `场景：${params.scene.title}——${params.scene.settingZh}`,
+        modeRule,
+        `难度：${DIFFICULTY_LABEL[params.difficulty]}（${DIFFICULTY_GUIDE[params.difficulty]}）。`,
         '',
-        '# 本轮句式提醒',
-        `你已经回复 ${aiTurns.length} 句，其中问句 ${questionTurns} 句（${ratio}%），上限 30%。`,
-        lastAi && lastAi.content.includes('?')
-            ? '上一轮你已经问过问题：这一轮必须用陈述句承接，不要再问。'
-            : '这一轮可以用陈述句承接，也可以顺带一个温和的问题。',
+        '规则：',
+        '1. 只输出 B 的一句英文台词：先说一句陈述或简短评价承接 A 的话，需要时再带一个温和的问句。',
+        '2. 问句占全部回复不超过 30%，不要连续两句都是问句，不要审问式追问。',
+        '3. 不复述 A 的话，不纠错、不解释、不加中文、不加引号或旁白。',
+        '4. 优先用本课核心词句组织台词，台词自然、口语化、简短。',
         '',
-        '# 到目前为止的完整对话（按时间顺序）',
-        formatDialogueHistory(params.history),
-        '',
-        '# 本轮学习者说的话',
-        params.userText,
-        '',
-        '请只输出那一个 JSON 对象。',
+        '示例：',
+        'A：I think I lost my phone.',
+        'B：Oh no, that is the worst. Where did you see it last?',
+        'A：It was in my pocket this morning.',
+        'B：That happens to me all the time. I once left mine in the fridge.',
+        'A：Do you have a charger?',
+        'B：Yeah, it is in my bag. I can grab it for you.',
     ].join('\n');
 };
 
 /**
- * 构建逐句纠错提示词。
+ * 构建本地模型的台词提示词（单条 prompt）。
  *
- * 说明：发音一类只允许基于识别引擎给出的低置信度词，模型不得凭空判断发音；
- * 这条约束是"评分诚实"的底线——本地识别只输出词序列与每词概率，
- * 没有音素、重音、语调信息。
- *
- * @param params 学习者原句与识别置信度低的词。
- * @returns 交给结构化生成的单条提示词。
+ * @param params 固定人设、历史、本轮输入与问句占比提醒。
+ * @returns 只要求一句台词的提示词。
  */
+export const buildDialogueReplyPrompt = (params: {
+    systemPrompt: string;
+    history: DialogueTurnVO[];
+    userText: string;
+}): string => {
+    const aiTurns = params.history.filter((turn) => turn.role === 'assistant');
+    const questionTurns = aiTurns.filter((turn) => turn.content.includes('?')).length;
+    const ratio = aiTurns.length === 0 ? 0 : Math.round((questionTurns / aiTurns.length) * 100);
+    const lastWasQuestion = aiTurns.at(-1)?.content.includes('?') ?? false;
+    return [
+        params.systemPrompt,
+        '',
+        '# 到目前为止的对话',
+        formatDialogueHistory(params.history),
+        '',
+        '# 学习者刚刚说',
+        params.userText,
+        '',
+        `# 提醒：你已经回复 ${aiTurns.length} 句，其中问句 ${questionTurns} 句（${ratio}%，上限 30%）。`,
+        lastWasQuestion ? '上一轮你已经问过问题，这一轮必须用陈述句承接。' : '',
+        '只输出 B 的一句英文台词，不要任何解释。',
+    ].filter((line) => line.length > 0).join('\n');
+};
+
+/**
+ * 构建单轮评测提示词（与台词生成分开调用）。
+ *
+ * @param params 学习者原句。
+ * @returns 交给结构化生成的评测提示词。
+ */
+export const buildEvaluationPrompt = (params: {
+    /** 学习者刚说的一句。 */
+    text: string;
+}): string => [
+    '你在给一位英语学习者的一句口语打分，只评这一句，不评其他人或更早的内容。',
+    `学习者原句：「${params.text}」`,
+    '',
+    '输出要求：',
+    '- overall：综合分 0~100，按能否在场景里把意思说清楚打分。',
+    '- grammar：语法分 0~100。',
+    '- wrongWordsScore：错词分 0~100，错词越多越低。',
+    '- error_list：最多 4 条，type 只能是 错词 / 漏词 / 冗余，word 填原句里的词，desc 用一句中文说明；没有错词给空数组。',
+    '- comment：只写美式口语优化建议（连读、弱读、地道替换、语法点评），一到两句中文。',
+    '- new_words：从原句里挑 0~4 个生词或短语（英文原型）。',
+    '',
+    '只输出一个 JSON 对象，不要任何解释文字：',
+    '{',
+    '  "overall": 0, "grammar": 0, "wrongWordsScore": 0,',
+    '  "error_list": [{"type": "错词", "word": "单词", "desc": "简短说明"}],',
+    '  "comment": "中文建议", "new_words": ["生词"]',
+    '}',
+].join('\n');
+
 export const buildCorrectionPrompt = (params: {
     /** 学习者的英文原句。 */
     text: string;

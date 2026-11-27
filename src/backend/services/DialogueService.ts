@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { inject, injectable } from 'inversify';
-import { generateObject, type ModelMessage } from 'ai';
+import { generateObject, generateText, type ModelMessage } from 'ai';
 import { z } from 'zod';
 import { getMainLogger } from '@/backend/infrastructure/logger';
 import TYPES from '@/backend/ioc/types';
@@ -19,7 +19,7 @@ import {
     dialogueCorrectionDraftSchema,
     dialogueReviewDraftSchema,
     dialogueSceneDraftSchema,
-    dialogueTurnReplySchema,
+    dialogueEvaluationDraftSchema,
     type DialogueAvailability,
     type DialogueCreateRequest,
     type DialogueCreateResult,
@@ -49,15 +49,16 @@ import {
     type DialogueReplyTurnRequest,
     type DialogueReplyTurnResult,
     type DialogueSceneDraft,
+    type DialogueEvaluationDraft,
     type DialogueTurnEvaluation,
-    type DialogueTurnReplyDraft,
 } from '@/common/contracts/dialogue';
 import { normalizeShadowingSource } from '@/backend/services/shadowing/ShadowingSource';
 import { normalizeWord, tokenizeForScoring } from '@/common/utils/wordTokens';
 import {
     buildCorrectionPrompt,
-    buildDialogueTurnPrompt,
-    buildDialogueTurnSystemPrompt,
+    buildDialogueReplyPrompt,
+    buildDialogueReplySystemPrompt,
+    buildEvaluationPrompt,
     buildLessonScenePrompt,
     buildReviewPrompt,
 } from '@/backend/services/dialogue/DialoguePromptBuilder';
@@ -436,7 +437,7 @@ export class DialogueServiceImpl implements DialogueService {
             // 有剧本时目标表达已经限定在剧本内，不再用练习记录覆盖；
             // 没有剧本时才走「练过的句子优先」，避免模型改写后复盘核对不上
             const scene = script ? generatedScene : applyFocusTargets(generatedScene, focusLines);
-            const systemPrompt = buildDialogueTurnSystemPrompt({
+            const systemPrompt = buildDialogueReplySystemPrompt({
                 scene,
                 difficulty: request.difficulty,
                 mode,
@@ -590,18 +591,25 @@ export class DialogueServiceImpl implements DialogueService {
         const difficulty = request.difficulty && DIALOGUE_DIFFICULTIES.includes(request.difficulty)
             ? request.difficulty
             : record.session.difficulty;
-        const systemPrompt = buildDialogueTurnSystemPrompt({
+        const systemPrompt = buildDialogueReplySystemPrompt({
             scene: record.scene,
             difficulty,
             mode: record.session.mode,
         });
-        let draft = await this.generateTurnReply({
-            systemPrompt,
-            history: turns,
-            userText: text,
-            backend: record.session.backend,
-        });
-        let reply = this.sanitizeReply(draft.ai_reply);
+        // 台词与评测分开调用：台词失败就没得聊，评测失败只让右栏空着
+        const [replyResult, evaluationResult] = await Promise.allSettled([
+            this.generateReplyLine({
+                systemPrompt,
+                history: turns,
+                userText: text,
+                backend: record.session.backend,
+            }),
+            this.generateEvaluation({ userText: text, backend: record.session.backend }),
+        ]);
+        if (replyResult.status === 'rejected') {
+            throw replyResult.reason;
+        }
+        let reply = this.sanitizeReply(replyResult.value);
         // 句式配比：上一轮已经是问句，或问句占比已超 30% 时，这一轮必须是陈述句
         const aiTurns = turns.filter((turn) => turn.role === 'assistant');
         const questionTurns = aiTurns.filter((turn) => turn.content.includes('?')).length;
@@ -613,15 +621,19 @@ export class DialogueServiceImpl implements DialogueService {
                 lastWasQuestion,
                 ratioTooHigh,
             });
-            draft = await this.generateTurnReply({
+            reply = this.sanitizeReply(await this.generateReplyLine({
                 systemPrompt,
                 history: turns,
                 userText: `${text}\n\n（这一轮不要提问：上一轮已经问过，或问句占比超了上限。请用一句陈述句或简短评价承接学习者的话，可以补一点自己的信息或打算。）`,
                 backend: record.session.backend,
-            });
-            reply = this.sanitizeReply(draft.ai_reply);
+            }));
         }
-        const evaluation = this.sanitizeEvaluation(draft, text);
+        if (evaluationResult.status === 'rejected') {
+            this.logger.warn('dialogue evaluation failed', { error: evaluationResult.reason });
+        }
+        const evaluation = evaluationResult.status === 'fulfilled'
+            ? this.sanitizeEvaluation(evaluationResult.value, text)
+            : null;
         const userTurn = await this.dialogueRepository.appendTurn({
             sessionId: request.sessionId,
             role: 'user',
@@ -638,8 +650,9 @@ export class DialogueServiceImpl implements DialogueService {
             backend: record.session.backend,
             mode: record.session.mode,
             hasAudio,
-            errorCount: evaluation.errorList.length,
-            vocabCount: evaluation.vocab.length,
+            hasEvaluation: evaluation !== null,
+            errorCount: evaluation?.errorList.length ?? 0,
+            vocabCount: evaluation?.vocab.length ?? 0,
             replyWords: tokenizeForScoring(reply).length,
         });
         return { userTurn, assistantTurn };
@@ -868,35 +881,31 @@ export class DialogueServiceImpl implements DialogueService {
     }
 
     /**
-     * 生成本轮回复：一句角色台词 + 对学习者这句的评测。
+     * 生成本轮台词：只输出一句英文，不掺评测。
      *
      * 说明：本地模型只有单条 prompt，历史拼进提示词；云端走 messages，
-     * 每轮都把完整历史重发一遍，保证上下文连贯、口径一致。
+     * 每轮都把完整历史重发一遍，保证上下文连贯。
      *
      * @param params 固定人设、历史、本轮输入与后端。
-     * @returns 通过 schema 校验的回复草稿。
+     * @returns 原始台词文本（未清洗）。
      */
-    private async generateTurnReply(params: {
+    private async generateReplyLine(params: {
         systemPrompt: string;
         history: DialogueTurnVO[];
         userText: string;
         backend: DialogueModelBackend;
-    }): Promise<DialogueTurnReplyDraft> {
+    }): Promise<string> {
         if (params.backend === 'local') {
             const modelId = await this.localAiService.getActiveModelId();
-            const prompt = buildDialogueTurnPrompt({
+            const prompt = buildDialogueReplyPrompt({
                 systemPrompt: params.systemPrompt,
                 history: params.history,
                 userText: params.userText,
             });
-            const raw = await this.localAiService.generate(
-                prompt,
-                z.toJSONSchema(dialogueTurnReplySchema),
-                modelId,
-                undefined,
-                { temperature: DIALOGUE_TEMPERATURE, topP: DIALOGUE_TOP_P },
-            );
-            return dialogueTurnReplySchema.parse(raw);
+            return this.localAiService.generateText(prompt, modelId, undefined, {
+                temperature: DIALOGUE_TEMPERATURE,
+                topP: DIALOGUE_TOP_P,
+            });
         }
         const model = this.aiProviderService.getModel('sentenceLearning');
         if (!model) {
@@ -909,14 +918,41 @@ export class DialogueServiceImpl implements DialogueService {
             } as ModelMessage)),
             { role: 'user', content: params.userText },
         ];
-        const result = await generateObject({
+        const result = await generateText({
             model,
-            schema: dialogueTurnReplySchema,
             system: params.systemPrompt,
             messages,
             temperature: DIALOGUE_TEMPERATURE,
             topP: DIALOGUE_TOP_P,
         });
+        return result.text;
+    }
+
+    /**
+     * 生成本轮评测：只打分，不管台词。
+     *
+     * @param params 学习者原句与后端。
+     * @returns 通过 schema 校验的评测草稿。
+     */
+    private async generateEvaluation(params: {
+        userText: string;
+        backend: DialogueModelBackend;
+    }): Promise<DialogueEvaluationDraft> {
+        const prompt = buildEvaluationPrompt({ text: params.userText });
+        if (params.backend === 'local') {
+            const modelId = await this.localAiService.getActiveModelId();
+            const raw = await this.localAiService.generate(
+                prompt,
+                z.toJSONSchema(dialogueEvaluationDraftSchema),
+                modelId,
+            );
+            return dialogueEvaluationDraftSchema.parse(raw);
+        }
+        const model = this.aiProviderService.getModel('sentenceLearning');
+        if (!model) {
+            throw new Error(CLOUD_AI_NOT_CONFIGURED_MESSAGE);
+        }
+        const result = await generateObject({ model, schema: dialogueEvaluationDraftSchema, prompt });
         return result.object;
     }
 
@@ -969,7 +1005,7 @@ export class DialogueServiceImpl implements DialogueService {
      * @returns 可展示、可入库的评测。
      */
     private sanitizeEvaluation(
-        draft: DialogueTurnReplyDraft,
+        draft: DialogueEvaluationDraft,
         userText: string,
     ): DialogueTurnEvaluation {
         const sentence = normalizePhrase(userText);

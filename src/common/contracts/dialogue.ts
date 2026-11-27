@@ -281,19 +281,14 @@ export const dialogueTurnEvaluationSchema = z.object({
 export type DialogueTurnEvaluation = z.infer<typeof dialogueTurnEvaluationSchema>;
 
 /**
- * 对话模型一轮回复的结构化输出契约（字段名与产品约定一致）。
+ * 单轮评测的结构化输出契约。
  *
- * 说明：ai_reply 是气泡里唯一的文字，其余字段全部只进右侧面板；
- * pronunciation 保留在 JSON 里只是为了贴合约定，服务端一律丢弃——
- * 发音分由独立发音评测模块给出，模型不得自评发音。
+ * 说明：台词与评测是两次独立调用——台词只负责说话，评测只负责打分，
+ * 这样小模型不会被两套要求互相干扰；发音分由独立模块给出，不在这里。
  */
-export const dialogueTurnReplySchema = z.object({
-    /** 角色台词：一句美式短句。 */
-    ai_reply: z.string().min(1),
+export const dialogueEvaluationDraftSchema = z.object({
     /** 综合分 0~100。 */
     overall: z.number().int().min(0).max(100),
-    /** 模型自评的发音分：仅占位，服务端不使用。 */
-    pronunciation: z.number().int().min(0).max(100).nullable(),
     /** 语法分 0~100。 */
     grammar: z.number().int().min(0).max(100),
     /** 错词分 0~100。 */
@@ -306,8 +301,8 @@ export const dialogueTurnReplySchema = z.object({
     new_words: z.array(z.string()).max(6),
 });
 
-/** 对话模型一轮回复的草稿类型。 */
-export type DialogueTurnReplyDraft = z.infer<typeof dialogueTurnReplySchema>;
+/** 单轮评测草稿类型。 */
+export type DialogueEvaluationDraft = z.infer<typeof dialogueEvaluationDraftSchema>;
 
 /**
  * 一条对话回合。

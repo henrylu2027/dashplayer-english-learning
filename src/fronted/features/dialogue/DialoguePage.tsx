@@ -63,7 +63,8 @@ export default function DialoguePage() {
     const [mode, setMode] = useState<DialogueSceneMode>('video');
     const [topic, setTopic] = useState('');
     const [difficulty, setDifficulty] = useState<DialogueDifficulty>('basic');
-    const [backend, setBackend] = useState<DialogueModelBackend>('local');
+    // 默认云端：本地小模型撑不住人设与句式规则，云端可用时优先
+    const [backend, setBackend] = useState<DialogueModelBackend>('cloud');
     const [creating, setCreating] = useState(false);
     const [active, setActive] = useState<{
         session: DialogueSessionSummary;
@@ -102,7 +103,7 @@ export default function DialoguePage() {
                 if (!backendInitializedRef.current) {
                     backendInitializedRef.current = true;
                     // 本地优先；本地不可用而云端可用时切到云端，并在界面上如实展示
-                    setBackend(result.local.available ? 'local' : 'cloud');
+                    setBackend(result.cloud.available ? 'cloud' : 'local');
                 }
             })
             .catch((availabilityError) => {
