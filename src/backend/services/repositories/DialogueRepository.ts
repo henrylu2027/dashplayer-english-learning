@@ -6,6 +6,7 @@ import type {
     DialogueScene,
     DialogueScript,
     DialogueSessionSummary,
+    DialogueTurnEvaluation,
     DialogueTurnVO,
 } from '@/common/contracts/dialogue';
 import type { ShadowingAttemptSource } from '@/common/contracts/shadowing';
@@ -42,6 +43,10 @@ export interface AppendDialogueTurnParams {
     content: string;
     /** 加入复习后的卡片 ID。 */
     cardId?: number | null;
+    /** 逐轮评测；只有学习者发言且由对话模型给出。 */
+    evaluation?: DialogueTurnEvaluation | null;
+    /** 助手台词的中文意思；学习者回合不传。 */
+    replyZh?: string | null;
 }
 
 /**

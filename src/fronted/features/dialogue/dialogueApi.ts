@@ -10,6 +10,8 @@ import type {
     DialogueFinishRequest,
     DialogueFinishResult,
     DialogueListQuery,
+    DialogueReplyTurnRequest,
+    DialogueReplyTurnResult,
     DialogueSessionSummary,
     DialogueTranscribeRequest,
     DialogueTranscribeResult,
@@ -39,6 +41,10 @@ export const dialogueApi = {
     /** 对一条学习者发言做逐句纠错。 */
     correctTurn: (params: DialogueCorrectTurnRequest): Promise<DialogueCorrectTurnResult> =>
         backendClient.call('dialogue/correct-turn', params),
+
+    /** 学习者说一句：模型回一句角色台词，并评测这一句。 */
+    replyTurn: (params: DialogueReplyTurnRequest): Promise<DialogueReplyTurnResult> =>
+        backendClient.call('dialogue/reply-turn', params),
 
     /** 结束对话并生成复盘。 */
     finish: (params: DialogueFinishRequest): Promise<DialogueFinishResult> =>

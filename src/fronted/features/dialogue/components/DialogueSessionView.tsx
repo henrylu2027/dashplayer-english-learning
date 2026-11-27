@@ -4,115 +4,50 @@ import toast from 'react-hot-toast';
 import { ArrowLeft, BookOpen, CheckCheck, Loader2, Play, RotateCcw, Volume2 } from 'lucide-react';
 
 import type {
-    DialogueCorrection,
     DialogueDifficulty,
     DialogueReview,
     DialogueScene,
     DialogueScript,
     DialogueSessionSummary,
-    DialogueSpeaker,
+    DialogueTurnEvaluation,
+    DialogueTurnHint,
+    DialogueTurnVO,
 } from '@/common/contracts/dialogue';
-import type { RetellResult } from '@/common/contracts/practice';
 import { DIALOGUE_DIFFICULTIES } from '@/common/contracts/dialogue';
 import { Button } from '@/fronted/components/ui/button';
-import { practiceApi } from '@/fronted/features/practice/practiceApi';
 import { srsApi } from '@/fronted/features/srs/srsApi';
 import { videoLearningApi } from '@/fronted/features/video-learning/videoLearningApi';
-import { getTtsUrl, playAudioUrlAndWait } from '@/fronted/infrastructure/audio/AudioPlayer';
 import { getRendererLogger } from '@/fronted/log/simple-logger';
 import { cn } from '@/fronted/lib/utils';
 import { dialogueApi } from '../dialogueApi';
-import CorrectionCard from './CorrectionCard';
 import DialogueComposer from './DialogueComposer';
 import HistoryList from './HistoryList';
 import SceneCardView from './SceneCardView';
-import SpeechScorePanel from './SpeechScorePanel';
+import TurnEvaluationPanel from './TurnEvaluationPanel';
 
 const logger = getRendererLogger('DialogueSessionView');
 
-/** 轮到 AI 时的起手停顿；真正的节奏由"上一句读完"决定。 */
-const AI_LINE_DELAY_MS = 400;
-
-/** 难度下拉的文案 key 前缀；具体文案在 pages.json 的 dialogue.difficulty 下。 */
+/** 难度下拉的文案 key 前缀。 */
 const DIFFICULTY_LABEL = 'dialogue.difficulty';
 
 /**
- * 气泡上方的角色标识：说话人 A/B + 是 AI 还是用户。
+ * 进行中的场景对话：AI 扮演一个角色，逐轮回复并评测学习者的上一句。
  *
- * @param speaker 剧本里的说话人。
- * @param role 这条消息是 AI 还是用户说的。
- * @param script 剧本，取角色名。
- * @returns 形如「A · Rose（用户）」的标签。
- */
-function dialogueSpeakerLabel(
-    speaker: DialogueSpeaker | undefined,
-    role: 'assistant' | 'user',
-    script: DialogueScript,
-): string {
-    const tag = speaker === 'a' ? 'A' : speaker === 'b' ? 'B' : '';
-    const name = speaker === 'a' ? script.roleAName : speaker === 'b' ? script.roleBName : '';
-    const who = role === 'assistant' ? 'AI' : '用户';
-    return name ? `${tag} · ${name}（${who}）` : `${tag}（${who}）`;
-}
-
-/**
- * 对话中的一条消息。
- */
-interface ScriptedItem {
-    /** 渲染用的稳定标识。 */
-    id: string;
-    /** 说话方。 */
-    role: 'assistant' | 'user';
-    /** 剧本里的说话人标签，用于显示 A / B。 */
-    speaker?: DialogueSpeaker;
-    /** 英文内容。 */
-    text: string;
-    /** 中文提示；只有 AI 台词带。 */
-    hintZh?: string;
-    /** 学习者发言在对话里的序号，从 0 开始；AI 台词为空。 */
-    userIndex?: number;
-    /** 逐句纠错；还没出结果时为空。 */
-    correction?: DialogueCorrection | null;
-}
-
-/**
- * 按剧本给学习者展示自己的台词。
- *
- * 说明：难度只控制"提示多少"，不改变台词本身——演的还是原片那一句。
- *
- * @param line 角色自己的台词。
- * @param difficulty 难度。
- * @returns 显示给学习者的提示文本。
- */
-const buildCue = (line: { en: string; zh?: string }, difficulty: DialogueDifficulty): string => {
-    if (difficulty === 'challenge') {
-        return line.zh ?? '…';
-    }
-    if (difficulty === 'intermediate') {
-        const words = line.en.split(/\s+/);
-        const head = words.slice(0, Math.max(1, Math.ceil(words.length / 2))).join(' ');
-        return `${head}…`;
-    }
-    return line.en;
-};
-
-/**
- * 进行中的场景对话：照着视频里这段真实台词，一句一句演下去。
- *
- * 左侧是对话气泡与录音区，右侧是学习者最近一次发言的发音评测面板；
- * 记录本身仍以剧本为准，AI 只负责逐句纠错与最后的复盘。
+ * 说明：气泡里只有角色台词，所有点评、纠错、连读建议都进右侧评测面板；
+ * 每轮请求都带着完整对话历史、场景背景、角色与难度，模型只在固定人设下发挥。
  *
  * @param props.session 会话摘要。
  * @param props.scene 场景卡。
- * @param props.script 原片剧本；为空时无法继续。
+ * @param props.script 原片剧本；只作为语境提示，不再驱动对话。
+ * @param props.history 最近的会话，渲染在页面底部。
  * @param props.onFinished 复盘完成回调。
  * @param props.onSpeak 朗读回调。
- * @param props.onBack 返回历史列表。
+ * @param props.onBack 返回会话列表。
+ * @param props.onOpenHistory 打开某条历史会话。
  */
 export default function DialogueSessionView({
     session,
     scene,
-    script,
     history,
     onFinished,
     onSpeak,
@@ -131,202 +66,154 @@ export default function DialogueSessionView({
     onOpenHistory: (sessionId: number) => void;
 }) {
     const { t } = useTranslation('pages');
-    const lines = useMemo(() => script?.lines ?? [], [script]);
-    /** 排练起点：锚点句在整部台词里的位置。 */
-    const startPosition = useMemo(() => {
-        if (!script) {
-            return 0;
-        }
-        const index = lines.findIndex((line) => line.index >= script.startIndex);
-        return index < 0 ? 0 : index;
-    }, [lines, script]);
-
-    const [items, setItems] = useState<ScriptedItem[]>([]);
-    /** 剧本里下一条要处理的行；等于行数表示台词演完了。 */
-    const [cursor, setCursor] = useState(startPosition);
-    /** 正在纠错的学习者发言序号。 */
-    const [correctingUserIndex, setCorrectingUserIndex] = useState<number | null>(null);
-    /** 是否有一句台词正在朗读；朗读期间不接受新的输入，避免连发。 */
-    const [speechPending, setSpeechPending] = useState(false);
+    /** 已落库的回合；加载完成前只有内存里的开场白。 */
+    const [turns, setTurns] = useState<DialogueTurnVO[]>([]);
+    const [loading, setLoading] = useState(true);
+    /** 最近一轮学习者的评测，显示在右栏。 */
+    const [evaluation, setEvaluation] = useState<DialogueTurnEvaluation | null>(null);
+    /** 学习者卡壳时给出的参考句式，显示在参考句式区。 */
+    const [hint, setHint] = useState<DialogueTurnHint | null>(null);
+    /** 本轮所有学习者评测，用于批量提取生词。 */
+    const [evaluations, setEvaluations] = useState<DialogueTurnEvaluation[]>([]);
+    const [sending, setSending] = useState(false);
     const [finishing, setFinishing] = useState(false);
-    /** 学习者扮演哪一方；可以在对话中随时互换。 */
-    const [learnerRole, setLearnerRole] = useState<DialogueSpeaker>(script?.learnerRole ?? 'a');
-    /** 难度：只影响提示多少，默认跟随会话。 */
-    const [difficulty, setDifficulty] = useState<DialogueDifficulty>(session.difficulty);
-    /** 最近一次发言的评测结果，显示在右栏。 */
-    const [score, setScore] = useState<RetellResult | null>(null);
-    /** 本轮所有语音发言的评测结果，用于批量提取生词。 */
-    const [turnScores, setTurnScores] = useState<RetellResult[]>([]);
-    const [savingBatch, setSavingBatch] = useState(false);
-    const [scoring, setScoring] = useState(false);
     const [savingWords, setSavingWords] = useState(false);
-    const bottomRef = useRef<HTMLDivElement | null>(null);
-    /** 已经落库的行，避免 effect 重跑时重复写入。 */
-    const persistedRef = useRef<Set<string>>(new Set());
-    /** 朗读队列：上一句读完再读下一句，避免互相打断。 */
-    const speechQueueRef = useRef<Promise<void>>(Promise.resolve());
-    /** 组件是否还挂着；朗读结束回调里避免对已卸载组件 setState。 */
+    const [savingBatch, setSavingBatch] = useState(false);
+    /** 难度：只影响这一轮提示词里的句式复杂度。 */
+    const [difficulty, setDifficulty] = useState<DialogueDifficulty>(session.difficulty);
+    /** 气泡区自己的滚动容器：新回合只把气泡区滚到底，不带动整页。 */
+    const bubbleListRef = useRef<HTMLDivElement | null>(null);
+    /** 已经自动入库的词，避免同一个词反复写库。 */
+    const savedWordsRef = useRef<Set<string>>(new Set());
     const mountedRef = useRef(true);
-
-    /**
-     * 把一句台词排进朗读队列。
-     * @param text 待朗读文本。
-     * @returns 这句读完（或失败）后 resolve 的 promise；调用方据此控制台词推进节奏。
-     */
-    const enqueueSpeech = useCallback((text: string): Promise<void> => {
-        if (!text.trim()) {
-            return Promise.resolve();
-        }
-        speechQueueRef.current = speechQueueRef.current
-            .then(async () => {
-                const url = await getTtsUrl(text);
-                await playAudioUrlAndWait(url);
-            })
-            .catch((error) => {
-                logger.warn('朗读失败', { error });
-            });
-        return speechQueueRef.current;
-    }, []);
-
-    const currentLine = cursor < lines.length ? lines[cursor] : null;
-    const waitingForLearner = currentLine?.speaker === learnerRole;
-    const finishedScript = lines.length > 0 && cursor >= lines.length;
-
-    // 轮到 AI：停顿一下，把下一句原台词说出来并落库
-    useEffect(() => {
-        if (!script || cursor >= lines.length) {
-            return;
-        }
-        const line = lines[cursor];
-        if (line.speaker === learnerRole) {
-            return;
-        }
-        const timer = setTimeout(() => {
-            const id = `ai-${cursor}`;
-            setItems((previous) => [...previous, {
-                id,
-                role: 'assistant',
-                speaker: line.speaker,
-                text: line.en,
-                hintZh: line.zh,
-            }]);
-            setSpeechPending(true);
-            const spoken = enqueueSpeech(line.en);
-            void spoken.then(() => {
-                if (mountedRef.current) {
-                    setSpeechPending(false);
-                    setCursor((value) => value + 1);
-                }
-            });
-            if (!persistedRef.current.has(id)) {
-                persistedRef.current.add(id);
-                void dialogueApi.appendTurn({
-                    sessionId: session.id,
-                    role: 'assistant',
-                    content: line.en,
-                }).catch((error) => {
-                    logger.error('AI 台词落库失败', { error });
-                });
-            }
-        }, AI_LINE_DELAY_MS);
-        return () => clearTimeout(timer);
-    }, [cursor, lines, learnerRole, script, session.id, enqueueSpeech]);
-
-    useEffect(() => {
-        bottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
-    }, [items, finishing]);
 
     useEffect(() => () => {
         mountedRef.current = false;
     }, []);
 
-    /**
-     * 对学习者这次发言做发音与语法评测。
-     *
-     * @param referenceText 本轮应说的台词原文。
-     * @param audio 录音字节；打字输入时不传，面板只提示不计发音。
-     * @param mimeType 录音 MIME。
-     */
-    const scoreTurn = async (referenceText: string, audio: Uint8Array, mimeType: string): Promise<void> => {
-        setScoring(true);
-        setScore(null);
-        try {
-            const result = await practiceApi.retell({
-                referenceText,
-                source: { kind: 'free' },
-                audio,
-                mimeType,
+    /** 读取已落库的回合；刚创建时只有开场白。 */
+    useEffect(() => {
+        let cancelled = false;
+        dialogueApi.detail(session.id)
+            .then((detail) => {
+                if (cancelled) {
+                    return;
+                }
+                setTurns(detail.turns);
+                const userTurns = detail.turns.filter((turn) => turn.role === 'user');
+                const lastEvaluation = [...userTurns].reverse()
+                    .find((turn) => turn.evaluation !== null)?.evaluation ?? null;
+                setEvaluation(lastEvaluation);
+                setEvaluations(userTurns.flatMap((turn) => (turn.evaluation ? [turn.evaluation] : [])));
+            })
+            .catch((error) => {
+                logger.error('读取对话回合失败', { error, sessionId: session.id });
+                // 读不到历史时至少把开场白显示出来，不让用户对着空白页
+                setTurns([{
+                    id: -1,
+                    role: 'assistant',
+                    content: scene.openingLineEn,
+                    cardId: null,
+                    correction: null,
+                    evaluation: null,
+                    replyZh: scene.openingHintZh,
+                    createdAt: Date.now(),
+                }]);
+            })
+            .finally(() => {
+                if (!cancelled) {
+                    setLoading(false);
+                }
             });
-            if (mountedRef.current) {
-                setScore(result);
-                setTurnScores((previous) => [...previous, result]);
+        return () => {
+            cancelled = true;
+        };
+    }, [scene.openingHintZh, scene.openingLineEn, session.id]);
+
+    useEffect(() => {
+        const list = bubbleListRef.current;
+        if (list) {
+            list.scrollTo({ top: list.scrollHeight, behavior: 'smooth' });
+        }
+    }, [turns, sending]);
+
+    /**
+     * 把生词写进词汇工坊；已经写过的词跳过。
+     * @param words 待入库的词。
+     * @returns 实际写入的条数。
+     */
+    const saveVocab = useCallback(async (words: string[]): Promise<number> => {
+        let added = 0;
+        for (const word of words) {
+            const trimmed = word.trim();
+            if (!trimmed || savedWordsRef.current.has(trimmed.toLowerCase())) {
+                continue;
             }
-        } catch (error) {
-            logger.error('对话发音评测失败', { error });
-            toast.error(error instanceof Error ? error.message : t('dialogue.scoreFailed'));
-        } finally {
-            if (mountedRef.current) {
-                setScoring(false);
+            try {
+                const response = await videoLearningApi.favoriteWord(trimmed);
+                if (response.success) {
+                    added += 1;
+                }
+                savedWordsRef.current.add(trimmed.toLowerCase());
+            } catch (error) {
+                logger.warn('生词入库失败', { error, word: trimmed });
             }
         }
-    };
+        return added;
+    }, []);
 
+    /**
+     * 发送学习者这一句：后端落库两条回合并返回评测。
+     * @param text 学习者输入。
+     * @param meta 录音线索。
+     */
     const handleSend = async (
         text: string,
         meta?: { lowConfidenceWords: string[]; audio?: Uint8Array; mimeType?: string },
     ): Promise<void> => {
-        const referenceText = currentLine?.en ?? text;
-        const userIndex = items.filter((item) => item.role === 'user').length;
-        let turnId: number;
-        try {
-            const saved = await dialogueApi.appendTurn({
-                sessionId: session.id,
-                role: 'user',
-                content: text,
-            });
-            turnId = saved.turn.id;
-        } catch (error) {
-            logger.error('学习者消息落库失败', { error });
-            toast.error(t('dialogue.turnSaveFailed'));
+        if (sending) {
             return;
         }
-        setItems((previous) => [...previous, {
-            id: `user-${userIndex}`,
-            role: 'user',
-            speaker: learnerRole,
-            text,
-            userIndex,
-            correction: null,
-        }]);
-        // 学习者这句也读一遍：作为标准发音示范；这句读完才轮到 AI 接话
-        setSpeechPending(true);
-        void enqueueSpeech(text).then(() => {
-            if (mountedRef.current) {
-                setSpeechPending(false);
-                setCursor((value) => value + 1);
-            }
-        });
-        // 有录音才做发音评测；打字输入没有音频
-        if (meta?.audio && meta.audio.byteLength > 0) {
-            void scoreTurn(referenceText, meta.audio, meta.mimeType ?? 'audio/webm');
-        }
-        setCorrectingUserIndex(userIndex);
-        dialogueApi.correctTurn({
-            sessionId: session.id,
-            turnId,
-            lowConfidenceWords: meta?.lowConfidenceWords ?? [],
-        })
-            .then((result) => {
-                setItems((previous) => previous.map((item) => (
-                    item.userIndex === userIndex ? { ...item, correction: result.correction } : item
-                )));
-            })
-            .catch((error) => {
-                logger.error('逐句纠错失败', { error, turnId });
-            })
-            .finally(() => {
-                setCorrectingUserIndex((current) => (current === userIndex ? null : current));
+        setSending(true);
+        try {
+            const result = await dialogueApi.replyTurn({
+                sessionId: session.id,
+                text,
+                difficulty,
+                // 只有录音输入才带这一项；打字输入必须留空，模型据此不给发音分
+                ...(meta ? { lowConfidenceWords: meta.lowConfidenceWords } : {}),
             });
+            if (!mountedRef.current) {
+                return;
+            }
+            setTurns((previous) => [...previous, result.userTurn, result.assistantTurn]);
+            const turnEvaluation = result.userTurn.evaluation;
+            setEvaluation(turnEvaluation);
+            setHint(result.hint);
+            if (turnEvaluation) {
+                setEvaluations((previous) => [...previous, turnEvaluation]);
+                // 生词统一入库：模型提取的生词 + 单词级的错词，右侧面板展示的同时写进词汇工坊
+                const autoWords = [
+                    ...turnEvaluation.vocab,
+                    ...turnEvaluation.problems
+                        .filter((problem) => problem.kind === 'grammar' || problem.kind === 'wording')
+                        .map((problem) => problem.original.trim())
+                        .filter((word) => /^[A-Za-z][A-Za-z'-]*$/.test(word)),
+                ];
+                const added = await saveVocab(autoWords);
+                if (added > 0) {
+                    toast.success(t('dialogue.vocabAutoSaved', { count: added }));
+                }
+            }
+            onSpeak(result.assistantTurn.content);
+        } catch (error) {
+            logger.error('对话回复失败', { error, sessionId: session.id });
+            toast.error(error instanceof Error ? error.message : t('dialogue.turnFailed'));
+        } finally {
+            if (mountedRef.current) {
+                setSending(false);
+            }
+        }
     };
 
     const handleFinish = async (): Promise<void> => {
@@ -342,65 +229,42 @@ export default function DialogueSessionView({
         }
     };
 
-    /** 把评测里读错/漏读的词与模型挑的生词送进词汇工坊。 */
+    /** 手动把本轮生词再写一遍；自动入库已经写过的不会重复。 */
     const handleAddWords = async (): Promise<void> => {
-        if (!score) {
-            return;
-        }
-        const words = new Set<string>();
-        for (const word of score.words) {
-            if (word.status !== 'correct') {
-                const text = (word.expected ?? word.actual ?? '').trim();
-                if (text) {
-                    words.add(text);
-                }
-            }
-        }
-        for (const word of score.vocab) {
-            if (word.trim()) {
-                words.add(word.trim());
-            }
-        }
-        if (words.size === 0) {
+        const words = evaluation?.vocab ?? [];
+        if (words.length === 0) {
             toast.success(t('practice.noProblemWords'));
             return;
         }
         setSavingWords(true);
-        let added = 0;
         try {
-            for (const word of words) {
-                const response = await videoLearningApi.favoriteWord(word);
-                if (response.success) {
-                    added += 1;
-                }
-            }
-            toast.success(t('practice.wordsAdded', { count: added }));
-        } catch (error) {
-            logger.error('加入生词本失败', { error });
-            toast.error(t('practice.wordsAddFailed'));
+            const added = await saveVocab(words);
+            toast.success(added > 0
+                ? t('practice.wordsAdded', { count: added })
+                : t('dialogue.wordsAlreadySaved'));
         } finally {
             setSavingWords(false);
         }
     };
 
     /**
-     * 批量提取本轮生词：汇总每轮评测里的错词与模型生词，写进词汇工坊，
+     * 批量提取本轮生词：汇总每轮评测里的生词与错词，写进词汇工坊，
      * 同时逐条加入间隔复习队列。
      */
     const handleBatchWords = async (): Promise<void> => {
         const words = new Set<string>();
-        for (const turn of turnScores) {
-            for (const item of turn.words) {
-                if (item.status !== 'correct') {
-                    const text = (item.expected ?? item.actual ?? '').trim();
-                    if (text) {
-                        words.add(text);
-                    }
-                }
-            }
+        for (const turn of evaluations) {
             for (const word of turn.vocab) {
                 if (word.trim()) {
                     words.add(word.trim());
+                }
+            }
+            for (const problem of turn.problems) {
+                // 只把单词级的错误吸收进生词本；整句片段进 SRS 没有复习价值
+                const original = problem.original.trim();
+                if ((problem.kind === 'grammar' || problem.kind === 'wording')
+                    && /^[A-Za-z][A-Za-z'-]*$/.test(original)) {
+                    words.add(original);
                 }
             }
         }
@@ -427,21 +291,25 @@ export default function DialogueSessionView({
         }
     };
 
-    /** 重置对话：清空本地演出记录，从起点重演（不影响已落库的历史）。 */
+    /** 重置对话：清空本地演出记录，从开场白重演（不影响已落库的历史）。 */
     const handleReset = (): void => {
-        setItems([]);
-        setCursor(startPosition);
-        setScore(null);
-        persistedRef.current.clear();
+        setTurns([{
+            id: -1,
+            role: 'assistant',
+            content: scene.openingLineEn,
+            cardId: null,
+            correction: null,
+            evaluation: null,
+            replyZh: scene.openingHintZh,
+            createdAt: Date.now(),
+        }]);
+        setEvaluation(null);
+        setHint(null);
+        setEvaluations([]);
+        savedWordsRef.current.clear();
     };
 
-    if (!script) {
-        return (
-            <section className="rounded-2xl border border-dashed border-border/60 px-4 py-8 text-center text-sm text-muted-foreground">
-                {t('dialogue.scriptMissing')}
-            </section>
-        );
-    }
+    const learnerTurnCount = useMemo(() => turns.filter((turn) => turn.role === 'user').length, [turns]);
 
     return (
         <div className="flex flex-col gap-4">
@@ -452,14 +320,6 @@ export default function DialogueSessionView({
                         {t('dialogue.sceneLabel')}
                         <span className="max-w-40 truncate text-foreground">{session.title || scene.title}</span>
                     </label>
-                    <select
-                        value={learnerRole}
-                        onChange={(event) => setLearnerRole(event.target.value as DialogueSpeaker)}
-                        className="h-8 rounded-full border border-border/60 bg-card px-3 text-xs text-foreground outline-none"
-                    >
-                        <option value="a">{t('dialogue.aiRoleLabel')}：{script.roleBName}</option>
-                        <option value="b">{t('dialogue.aiRoleLabel')}：{script.roleAName}</option>
-                    </select>
                     <select
                         value={difficulty}
                         onChange={(event) => setDifficulty(event.target.value as DialogueDifficulty)}
@@ -478,13 +338,14 @@ export default function DialogueSessionView({
                     <div className="flex items-center justify-between gap-2">
                         <h2 className="text-sm font-medium text-foreground">{t('dialogue.chatTitle')}</h2>
                         <span className="text-xs text-muted-foreground">
-                            {t('dialogue.youPlay', { name: learnerRole === 'a' ? script.roleAName : script.roleBName })}
+                            {t('dialogue.youPlay', { name: scene.userRole })}
                         </span>
                     </div>
 
                     <SceneCardView
                         scene={scene}
                         onSpeak={onSpeak}
+                        hint={hint}
                         actions={(
                             <>
                                 <Button
@@ -511,16 +372,25 @@ export default function DialogueSessionView({
                         )}
                     />
 
-                    <div className="flex flex-col gap-3">
-                        {items.map((item) => (
+                    <div
+                        ref={bubbleListRef}
+                        className="flex max-h-[46vh] min-h-40 flex-col gap-3 overflow-y-auto pr-1"
+                    >
+                        {loading && (
+                            <div className="flex items-center justify-center gap-2 py-6 text-xs text-muted-foreground">
+                                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                {t('dialogue.turnsLoading')}
+                            </div>
+                        )}
+                        {!loading && turns.map((turn) => (
                             <div
-                                key={item.id}
-                                className={cn('flex items-center gap-2', item.role === 'user' ? 'justify-end' : 'justify-start')}
+                                key={turn.id}
+                                className={cn('flex items-center gap-2', turn.role === 'user' ? 'justify-end' : 'justify-start')}
                             >
-                                {item.role === 'assistant' && (
+                                {turn.role === 'assistant' && (
                                     <button
                                         type="button"
-                                        onClick={() => onSpeak(item.text)}
+                                        onClick={() => onSpeak(turn.content)}
                                         aria-label={t('dialogue.speak')}
                                         className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground transition-colors hover:text-foreground"
                                     >
@@ -531,36 +401,28 @@ export default function DialogueSessionView({
                                     <div
                                         className={cn(
                                             'text-[11px]',
-                                            item.role === 'user' ? 'text-right text-muted-foreground' : 'text-muted-foreground',
+                                            turn.role === 'user' ? 'text-right text-muted-foreground' : 'text-muted-foreground',
                                         )}
                                     >
-                                        {dialogueSpeakerLabel(item.speaker, item.role, script)}
+                                        {turn.role === 'assistant'
+                                            ? t('dialogue.bubbleAi', { name: scene.aiRole })
+                                            : t('dialogue.bubbleUser', { name: scene.userRole })}
                                     </div>
                                     <div
                                         className={cn(
                                             'select-text whitespace-pre-wrap rounded-2xl px-3.5 py-2.5 text-sm leading-6',
-                                            item.role === 'user'
+                                            turn.role === 'user'
                                                 ? 'rounded-tr-sm bg-primary text-primary-foreground'
                                                 : 'rounded-tl-sm bg-sky-500/15 text-foreground',
                                         )}
                                     >
-                                        {item.text}
+                                        {turn.content}
                                     </div>
-                                    {item.hintZh && (
-                                        <div className="mt-1 text-xs leading-5 text-muted-foreground">{item.hintZh}</div>
-                                    )}
-                                    {item.role === 'user' && (
-                                        <CorrectionCard
-                                            correction={item.correction ?? null}
-                                            pending={correctingUserIndex === item.userIndex}
-                                            spokenText={item.text}
-                                        />
-                                    )}
                                 </div>
-                                {item.role === 'user' && (
+                                {turn.role === 'user' && (
                                     <button
                                         type="button"
-                                        onClick={() => onSpeak(item.text)}
+                                        onClick={() => onSpeak(turn.content)}
                                         aria-label={t('dialogue.speak')}
                                         className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground transition-colors hover:text-foreground"
                                     >
@@ -569,33 +431,23 @@ export default function DialogueSessionView({
                                 )}
                             </div>
                         ))}
+                        {sending && (
+                            <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                {t('dialogue.thinking')}
+                            </div>
+                        )}
                     </div>
 
                     <div className="border-t border-border/50 pt-4">
-                        {waitingForLearner && currentLine ? (
-                            <>
-                                <div className="mb-2 rounded-xl bg-primary/5 px-3 py-2">
-                                    <div className="text-[11px] text-muted-foreground">
-                                        {t('dialogue.yourLine')} · {lines[cursor].speaker === 'a' ? script.roleAName : script.roleBName}
-                                    </div>
-                                    <div className="mt-0.5 text-sm leading-6 text-foreground">
-                                        {buildCue(currentLine, difficulty)}
-                                    </div>
-                                </div>
-                                <DialogueComposer
-                                    disabled={finishing || speechPending}
-                                    busy={false}
-                                    onStop={() => undefined}
-                                    onSend={(text, meta) => {
-                                        void handleSend(text, meta);
-                                    }}
-                                />
-                            </>
-                        ) : (
-                            <div className="py-2 text-center text-xs text-muted-foreground">
-                                {finishedScript ? t('dialogue.scriptDone') : t('dialogue.scriptPlaying')}
-                            </div>
-                        )}
+                        <DialogueComposer
+                            disabled={finishing || loading}
+                            busy={sending}
+                            onStop={() => undefined}
+                            onSend={(text, meta) => {
+                                void handleSend(text, meta);
+                            }}
+                        />
                     </div>
 
                     <div className="flex flex-wrap items-center justify-end gap-2">
@@ -604,7 +456,7 @@ export default function DialogueSessionView({
                             size="sm"
                             variant="outline"
                             className="h-9 rounded-xl px-4 text-sm"
-                            disabled={turnScores.length === 0 || savingBatch}
+                            disabled={evaluations.length === 0 || savingBatch}
                             onClick={() => void handleBatchWords()}
                         >
                             {savingBatch
@@ -615,7 +467,7 @@ export default function DialogueSessionView({
                         <Button
                             type="button"
                             size="sm"
-                            variant={finishedScript ? 'default' : 'outline'}
+                            variant={learnerTurnCount > 0 ? 'default' : 'outline'}
                             className="h-9 rounded-xl px-4 text-sm"
                             disabled={finishing}
                             onClick={() => void handleFinish()}
@@ -628,27 +480,23 @@ export default function DialogueSessionView({
                     </div>
                 </section>
 
-                {/* 右：发音评测 */}
-                <SpeechScorePanel
-                    result={score}
-                    pending={scoring}
-                    disabled={false}
+                {/* 右：AI 评测 */}
+                <TurnEvaluationPanel
+                    evaluation={evaluation}
+                    pending={sending}
                     savingWords={savingWords}
                     onAddWords={() => void handleAddWords()}
                     onRetry={() => {
-                        setScore(null);
                         toast.success(t('dialogue.retryHint'));
                     }}
                     onContinue={() => {
-                        setScore(null);
+                        setHint(null);
                     }}
                 />
             </div>
 
             {/* 底部：最近对话 */}
             <HistoryList sessions={history} onOpen={onOpenHistory} />
-
-            <div ref={bottomRef} />
         </div>
     );
 }

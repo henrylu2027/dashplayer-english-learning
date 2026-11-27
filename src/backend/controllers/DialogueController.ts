@@ -17,6 +17,7 @@ export default class DialogueController implements Controller {
         registerRoute('dialogue/create', (p) => this.dialogueService.create(p));
         registerRoute('dialogue/transcribe', (p) => this.dialogueService.transcribe(p));
         registerRoute('dialogue/append-turn', (p) => this.dialogueService.appendTurn(p));
+        registerRoute('dialogue/reply-turn', (p) => this.dialogueService.replyTurn(p));
         registerRoute('dialogue/correct-turn', (p) => this.dialogueService.correctTurn(p));
         registerRoute('dialogue/finish', (p) => this.dialogueService.finish(p));
         registerRoute('dialogue/list', (p) => this.dialogueService.list(p));

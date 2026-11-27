@@ -12,6 +12,11 @@ export interface LocalGenerateTextOptions {
      * 翻译属近确定性任务，传入低值（如 0.3）减少元话发挥与填充凑行。
      */
     temperature?: number;
+    /**
+     * nucleus 采样阈值覆盖；缺省 0.95。
+     * 场景对话用更低的值（如 0.8）收窄候选，避免角色扮演跑偏。
+     */
+    topP?: number;
 }
 
 /** 本地模型安装、生命周期和结构化推理的业务边界。 */
@@ -45,8 +50,15 @@ export default interface LocalAiService {
      * @param schema 期望输出的 JSON Schema。
      * @param modelId 目录内的模型标识，必须显式指定，不做默认回退。
      * @param signal 外部取消信号。
+     * @param options 可选采样覆盖（温度、top_p）。
      */
-    generate(prompt: string, schema: Record<string, unknown>, modelId: string, signal?: AbortSignal): Promise<unknown>;
+    generate(
+        prompt: string,
+        schema: Record<string, unknown>,
+        modelId: string,
+        signal?: AbortSignal,
+        options?: LocalGenerateTextOptions,
+    ): Promise<unknown>;
     /**
      * 使用指定模型生成纯文本（可选 GBNF 语法约束输出形状）；取消、截断时抛错。
      *

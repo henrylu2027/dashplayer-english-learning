@@ -18,6 +18,7 @@ import {
     dialogueReviewSchema,
     dialogueSceneSchema,
     dialogueScriptSchema,
+    dialogueTurnEvaluationSchema,
     type DialogueCorrection,
     type DialogueDifficulty,
     type DialogueModelBackend,
@@ -26,6 +27,7 @@ import {
     type DialogueScene,
     type DialogueScript,
     type DialogueSessionSummary,
+    type DialogueTurnEvaluation,
     type DialogueTurnVO,
 } from '@/common/contracts/dialogue';
 import type DialogueRepository from '@/backend/services/repositories/DialogueRepository';
@@ -128,6 +130,17 @@ function parseCorrection(json: string | null): DialogueCorrection | null {
 }
 
 /**
+ * 解析逐轮评测 JSON；没有评测时为 null。
+ * @param json 数据库中的评测字段。
+ */
+function parseEvaluation(json: string | null): DialogueTurnEvaluation | null {
+    if (!json) {
+        return null;
+    }
+    return dialogueTurnEvaluationSchema.parse(JSON.parse(json));
+}
+
+/**
  * 映射回合行。
  * @param row 数据库行。
  */
@@ -138,6 +151,8 @@ function mapTurn(row: DialogueTurnRow): DialogueTurnVO {
         content: row.content,
         cardId: row.card_id,
         correction: parseCorrection(row.correction_json),
+        evaluation: parseEvaluation(row.evaluation_json),
+        replyZh: row.reply_zh,
         createdAt: row.created_at,
     };
 }
@@ -239,6 +254,8 @@ export default class DialogueRepositoryImpl implements DialogueRepository {
                 role: params.role,
                 content: params.content,
                 card_id: params.cardId ?? null,
+                evaluation_json: params.evaluation ? JSON.stringify(params.evaluation) : null,
+                reply_zh: params.replyZh ?? null,
                 created_at: Date.now(),
             })
             .run();

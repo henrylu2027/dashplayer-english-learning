@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { inject, injectable } from 'inversify';
-import { generateObject } from 'ai';
+import { generateObject, type ModelMessage } from 'ai';
 import { z } from 'zod';
 import { getMainLogger } from '@/backend/infrastructure/logger';
 import TYPES from '@/backend/ioc/types';
@@ -19,6 +19,7 @@ import {
     dialogueCorrectionDraftSchema,
     dialogueReviewDraftSchema,
     dialogueSceneSchema,
+    dialogueTurnReplySchema,
     type DialogueAvailability,
     type DialogueCreateRequest,
     type DialogueCreateResult,
@@ -45,12 +46,19 @@ import {
     type DialogueCorrection,
     type DialogueCorrectionDraft,
     type DialogueCorrectionItem,
+    type DialogueReplyTurnRequest,
+    type DialogueReplyTurnResult,
+    type DialogueTurnEvaluation,
+    type DialogueTurnHint,
+    type DialogueTurnReplyDraft,
 } from '@/common/contracts/dialogue';
 import { normalizeShadowingSource } from '@/backend/services/shadowing/ShadowingSource';
 import { normalizeWord, tokenizeForScoring } from '@/common/utils/wordTokens';
 import {
     buildCorrectionPrompt,
     buildDialogueSystemPrompt,
+    buildDialogueTurnPrompt,
+    buildDialogueTurnSystemPrompt,
     buildReviewPrompt,
     buildScenePrompt,
     buildScriptScenePrompt,
@@ -98,6 +106,18 @@ export default interface DialogueService {
      * @throws 会话不存在或已结束时抛出。
      */
     appendTurn(request: DialogueAppendTurnRequest): Promise<DialogueAppendTurnResult>;
+
+    /**
+     * 学习者说一句，模型回一句角色台词并评测这一句。
+     *
+     * 说明：每次请求都携带完整对话历史、场景背景、角色与难度；
+     * 角色台词与评测在同一个 JSON 里严格分开，两条回合都由后端落库。
+     *
+     * @param request 会话、学习者原话与可选的低置信度词。
+     * @returns 两条回合与可选的卡壳提示。
+     * @throws 会话不存在/已结束、内容为空或生成失败时抛出。
+     */
+    replyTurn(request: DialogueReplyTurnRequest): Promise<DialogueReplyTurnResult>;
 
     /**
      * 结束对话并生成复盘；已复盘时幂等返回原结果。
@@ -159,6 +179,24 @@ const MAX_LOW_CONFIDENCE_WORDS = 6;
 
 /** 单轮纠错最多几条意见，与 schema 上限一致。 */
 const MAX_CORRECTION_ITEMS = 4;
+
+/**
+ * 场景对话的采样参数。
+ *
+ * 温度 0.65 让台词自然、有变化；top_p 0.8 收窄候选池，
+ * 避免小模型在多轮对话里突然跑题或改写人设。
+ */
+const DIALOGUE_TEMPERATURE = 0.65;
+const DIALOGUE_TOP_P = 0.8;
+
+/** 角色台词词数兜底上限；提示词要求一句且不超过 14 词，超出时只保留第一句。 */
+const MAX_REPLY_WORDS = 24;
+
+/** 台词为空时的兜底；宁可让学习者重说，也不把空白气泡发出去。 */
+const FALLBACK_REPLY = 'Sorry, could you say that again?';
+
+/** 每轮最多提取几个生词。 */
+const MAX_TURN_VOCAB = 4;
 
 /**
  * 把文本归一化为用于目标表达匹配的字符串。
@@ -509,6 +547,71 @@ export class DialogueServiceImpl implements DialogueService {
         return { turn };
     }
 
+    public async replyTurn(request: DialogueReplyTurnRequest): Promise<DialogueReplyTurnResult> {
+        if (!Number.isInteger(request.sessionId)) {
+            throw new Error('对话请求缺少会话');
+        }
+        const text = request.text.trim();
+        if (text.length === 0) {
+            throw new Error('先说一句再发送');
+        }
+        if (text.length > MAX_TURN_CHARS) {
+            throw new Error(`单条消息过长，请控制在 ${MAX_TURN_CHARS} 字以内`);
+        }
+        const record = await this.dialogueRepository.getSession(request.sessionId);
+        if (record.session.finishedAt !== null) {
+            throw new Error('对话已结束，不能再继续');
+        }
+        const turns = await this.dialogueRepository.listTurns(request.sessionId);
+        // undefined 表示打字输入；数组（可能为空）表示来自录音，发音分只在录音时才有
+        const hasAudio = Array.isArray(request.lowConfidenceWords);
+        const lowConfidenceWords = (request.lowConfidenceWords ?? [])
+            .map((word) => word.trim())
+            .filter((word) => word.length > 0)
+            .slice(0, MAX_LOW_CONFIDENCE_WORDS);
+        // 难度可以在对话中途调整：界面传了就用界面的，否则沿用创建时的设置
+        const difficulty = request.difficulty && DIALOGUE_DIFFICULTIES.includes(request.difficulty)
+            ? request.difficulty
+            : record.session.difficulty;
+        const systemPrompt = buildDialogueTurnSystemPrompt({
+            scene: record.scene,
+            difficulty,
+        });
+        const draft = await this.generateTurnReply({
+            systemPrompt,
+            history: turns,
+            userText: text,
+            hasAudio,
+            lowConfidenceWords,
+            backend: record.session.backend,
+        });
+        const replyEn = this.sanitizeReply(draft.replyEn);
+        const evaluation = this.sanitizeEvaluation(draft.evaluation, text, hasAudio, lowConfidenceWords);
+        const hint = this.sanitizeHint(draft.hint);
+        const userTurn = await this.dialogueRepository.appendTurn({
+            sessionId: request.sessionId,
+            role: 'user',
+            content: text,
+            evaluation,
+        });
+        const assistantTurn = await this.dialogueRepository.appendTurn({
+            sessionId: request.sessionId,
+            role: 'assistant',
+            content: replyEn,
+            replyZh: draft.replyZh.trim() || null,
+        });
+        this.logger.info('dialogue turn replied', {
+            sessionId: request.sessionId,
+            backend: record.session.backend,
+            hasAudio,
+            problemCount: evaluation.problems.length,
+            vocabCount: evaluation.vocab.length,
+            hasHint: hint !== null,
+            replyWords: tokenizeForScoring(replyEn).length,
+        });
+        return { userTurn, assistantTurn, hint };
+    }
+
     public async finish(request: DialogueFinishRequest): Promise<DialogueFinishResult> {
         const record = await this.dialogueRepository.getSession(request.sessionId);
         if (record.review) {
@@ -657,6 +760,203 @@ export class DialogueServiceImpl implements DialogueService {
             draft: result.object,
             reviewer: { backend: 'cloud', model: routed.modelId },
         };
+    }
+
+    /**
+     * 生成本轮回复：一句角色台词 + 对学习者这句的评测。
+     *
+     * 说明：本地模型只有单条 prompt，历史拼进提示词；云端走 messages，
+     * 每轮都把完整历史重发一遍，保证上下文连贯、口径一致。
+     *
+     * @param params 固定人设、历史、本轮输入与后端。
+     * @returns 通过 schema 校验的回复草稿。
+     */
+    private async generateTurnReply(params: {
+        systemPrompt: string;
+        history: DialogueTurnVO[];
+        userText: string;
+        hasAudio: boolean;
+        lowConfidenceWords: string[];
+        backend: DialogueModelBackend;
+    }): Promise<DialogueTurnReplyDraft> {
+        if (params.backend === 'local') {
+            const modelId = await this.localAiService.getActiveModelId();
+            const prompt = buildDialogueTurnPrompt({
+                systemPrompt: params.systemPrompt,
+                history: params.history,
+                userText: params.userText,
+                hasAudio: params.hasAudio,
+                lowConfidenceWords: params.lowConfidenceWords,
+            });
+            const raw = await this.localAiService.generate(
+                prompt,
+                z.toJSONSchema(dialogueTurnReplySchema),
+                modelId,
+                undefined,
+                { temperature: DIALOGUE_TEMPERATURE, topP: DIALOGUE_TOP_P },
+            );
+            return dialogueTurnReplySchema.parse(raw);
+        }
+        const model = this.aiProviderService.getModel('sentenceLearning');
+        if (!model) {
+            throw new Error(CLOUD_AI_NOT_CONFIGURED_MESSAGE);
+        }
+        const messages: ModelMessage[] = [
+            ...params.history.map((turn) => ({
+                role: turn.role,
+                content: turn.content,
+            } as ModelMessage)),
+            { role: 'user', content: this.buildTurnUserMessage(params) },
+        ];
+        const result = await generateObject({
+            model,
+            schema: dialogueTurnReplySchema,
+            system: params.systemPrompt,
+            messages,
+            temperature: DIALOGUE_TEMPERATURE,
+            topP: DIALOGUE_TOP_P,
+        });
+        return result.object;
+    }
+
+    /**
+     * 把本轮输入与录音线索拼成用户消息。
+     * @param params 本轮输入与是否来自录音。
+     * @returns 发给模型的用户消息。
+     */
+    private buildTurnUserMessage(params: {
+        userText: string;
+        hasAudio: boolean;
+        lowConfidenceWords: string[];
+    }): string {
+        const note = params.hasAudio
+            ? (params.lowConfidenceWords.length > 0
+                ? `（这条来自录音，识别没把握的词：${params.lowConfidenceWords.join('、')}）`
+                : '（这条来自录音，识别没有明显没把握的词）')
+            : '（这条是打字输入，pronunciation 必须为 null，也不能给 pronunciation 类问题）';
+        return `${params.userText}\n\n${note}`;
+    }
+
+    /**
+     * 清洗角色台词：只留一句英文，去掉中文、括号旁白与说话人前缀。
+     *
+     * 说明：气泡里只允许出现角色台词，模型偶尔会夹带解释、中文或引号，
+     * 这道清洗比只靠提示词更可靠。
+     *
+     * @param raw 模型返回的台词。
+     * @returns 可直接显示的一句英文。
+     */
+    private sanitizeReply(raw: string): string {
+        let text = raw
+            // 台词里不允许出现中文（含中文标点与全角字符）
+            .replace(/[\u4e00-\u9fff\u3000-\u303f\uff00-\uffef]+/g, ' ')
+            // 去掉括号里的旁白或备注
+            .replace(/[（(][^）)]*[）)]/g, ' ')
+            // 去掉「AI:」「Rose:」之类的前缀
+            .replace(/^\s*[A-Za-z][A-Za-z .'-]{0,20}\s*[:：]\s*/, '')
+            .replace(/\s+/g, ' ')
+            .trim();
+        // 只取第一句：一句一句聊，避免模型一次说一大段
+        const firstSentence = text.split(/(?<=[.!?])\s+/).find((part) => part.trim().length > 0);
+        if (firstSentence) {
+            text = firstSentence.trim();
+        }
+        if (tokenizeForScoring(text).length > MAX_REPLY_WORDS) {
+            this.logger.warn('dialogue reply longer than expected', { words: tokenizeForScoring(text).length });
+        }
+        if (!text) {
+            return FALLBACK_REPLY;
+        }
+        return /[.!?]$/.test(text) ? text : `${text}.`;
+    }
+
+    /**
+     * 清洗评测：丢弃引用不到学习者原句的意见、无录音依据的发音意见，并统一分数区间。
+     *
+     * @param draft 模型返回的评测。
+     * @param userText 学习者原句。
+     * @param hasAudio 本轮是否来自录音。
+     * @param lowConfidenceWords 识别没把握的词。
+     * @returns 可展示、可入库的评测。
+     */
+    private sanitizeEvaluation(
+        draft: DialogueTurnEvaluation,
+        userText: string,
+        hasAudio: boolean,
+        lowConfidenceWords: string[],
+    ): DialogueTurnEvaluation {
+        const sentence = normalizePhrase(userText);
+        const lowSet = new Set(lowConfidenceWords.map((word) => normalizePhrase(word)).filter((word) => word.length > 0));
+        const seen = new Set<string>();
+        const problems = draft.problems.filter((item) => {
+            const original = normalizePhrase(item.original);
+            const better = normalizePhrase(item.better);
+            if (original.length === 0 || original === better) {
+                return false;
+            }
+            if (item.kind === 'pronunciation') {
+                // 发音类只能落在识别没把握的词上；打字输入一律不判发音
+                if (!hasAudio || lowSet.size === 0) {
+                    return false;
+                }
+                const hit = [...lowSet].some((word) => original.includes(word) || word.includes(original));
+                if (!hit) {
+                    return false;
+                }
+            } else if (!sentence.includes(original)) {
+                return false;
+            }
+            const key = `${item.kind}:${original}`;
+            if (seen.has(key)) {
+                return false;
+            }
+            seen.add(key);
+            return true;
+        }).slice(0, MAX_CORRECTION_ITEMS);
+
+        const vocab: string[] = [];
+        for (const word of draft.vocab) {
+            const trimmed = word.trim();
+            if (vocab.length >= MAX_TURN_VOCAB) {
+                break;
+            }
+            // 生词本只收英文单词或短语，混进来的解释句直接丢掉
+            if (!/^[A-Za-z][A-Za-z' -]*$/.test(trimmed)) {
+                continue;
+            }
+            if (vocab.some((item) => item.toLowerCase() === trimmed.toLowerCase())) {
+                continue;
+            }
+            vocab.push(trimmed);
+        }
+
+        const clampScore = (value: number | null): number | null => (value === null
+            ? null
+            : Math.max(0, Math.min(100, Math.round(value))));
+        return {
+            overall: Math.max(0, Math.min(100, Math.round(draft.overall))),
+            grammar: clampScore(draft.grammar),
+            pronunciation: hasAudio ? clampScore(draft.pronunciation) : null,
+            commentZh: draft.commentZh.trim(),
+            problems,
+            vocab,
+        };
+    }
+
+    /**
+     * 清洗卡壳提示：英文为空时整条丢弃。
+     * @param hint 模型返回的提示。
+     * @returns 可展示的提示或 null。
+     */
+    private sanitizeHint(hint: DialogueTurnHint | null): DialogueTurnHint | null {
+        if (!hint) {
+            return null;
+        }
+        const en = hint.en.trim();
+        if (en.length === 0) {
+            return null;
+        }
+        return { en, zh: hint.zh.trim() };
     }
 
     /**

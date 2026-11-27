@@ -2,7 +2,7 @@ import type { ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Volume2 } from 'lucide-react';
 
-import type { DialogueScene } from '@/common/contracts/dialogue';
+import type { DialogueScene, DialogueTurnHint } from '@/common/contracts/dialogue';
 
 /**
  * 场景卡：设定、双方角色与参考句式。
@@ -10,15 +10,18 @@ import type { DialogueScene } from '@/common/contracts/dialogue';
  * @param props.scene 场景卡。
  * @param props.onSpeak 朗读参考句式。
  * @param props.actions 场景信息区右上角的操作按钮（重置对话、返回列表）。
+ * @param props.hint 学习者卡壳时给出的参考句式；只出现在这里，不进入对话气泡。
  */
 export default function SceneCardView({
     scene,
     onSpeak,
     actions,
+    hint,
 }: {
     scene: DialogueScene;
     onSpeak: (text: string) => void;
     actions?: ReactNode;
+    hint?: DialogueTurnHint | null;
 }) {
     const { t } = useTranslation('pages');
     return (
@@ -62,6 +65,24 @@ export default function SceneCardView({
                         </button>
                     ))}
                 </div>
+                {hint && (
+                    <button
+                        type="button"
+                        onClick={() => onSpeak(hint.en)}
+                        className="mt-2 flex w-full items-start gap-1.5 rounded-xl border border-amber-500/40 bg-amber-500/10 px-2.5 py-1.5 text-left text-xs text-foreground/90 transition-colors hover:border-amber-500/60"
+                    >
+                        <span className="shrink-0 rounded bg-amber-500/20 px-1.5 py-0.5 text-[10px] text-amber-700 dark:text-amber-300">
+                            {t('dialogue.hintLabel')}
+                        </span>
+                        <span className="min-w-0">
+                            <span>{hint.en}</span>
+                            {hint.zh.trim() !== '' && (
+                                <span className="ml-1.5 text-muted-foreground">{hint.zh}</span>
+                            )}
+                        </span>
+                        <Volume2 className="mt-0.5 h-3 w-3 shrink-0 text-muted-foreground" />
+                    </button>
+                )}
             </div>
         </section>
     );

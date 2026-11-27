@@ -396,6 +396,30 @@ export default function DialoguePage() {
                                         <CorrectionCard correction={turn.correction} pending={false} />
                                     </div>
                                 )}
+                                {turn.role === 'user' && turn.evaluation && (
+                                    <div className="mt-1 flex w-full justify-end">
+                                        <div className="max-w-[85%] rounded-xl border border-border/60 bg-muted/40 px-3 py-2 text-[11px] leading-5">
+                                            <div className="text-muted-foreground">
+                                                {t('dialogue.scoreOverall')} {turn.evaluation.overall}
+                                                {' · '}
+                                                {turn.evaluation.commentZh}
+                                            </div>
+                                            {turn.evaluation.problems.map((problem) => (
+                                                <div key={`${problem.kind}-${problem.original}`} className="mt-0.5">
+                                                    <span className="text-foreground/70 line-through">{problem.original}</span>
+                                                    <span className="mx-1 text-muted-foreground">→</span>
+                                                    <span className="text-foreground">{problem.better}</span>
+                                                    <span className="ml-1 text-muted-foreground">{problem.whyZh}</span>
+                                                </div>
+                                            ))}
+                                            {turn.evaluation.vocab.length > 0 && (
+                                                <div className="mt-0.5 text-muted-foreground">
+                                                    {t('dialogue.evalVocab')}：{turn.evaluation.vocab.join('、')}
+                                                </div>
+                                            )}
+                                        </div>
+                                    </div>
+                                )}
                             </div>
                         ))}
                     </section>

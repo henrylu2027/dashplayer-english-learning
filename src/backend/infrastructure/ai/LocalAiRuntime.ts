@@ -601,8 +601,14 @@ export class LocalAiRuntime implements LocalAiService {
     /**
      * 串行生成，限制上下文和输出长度；仅接受完整结束且可解析的 JSON。
      */
-    public async generate(prompt: string, schema: Record<string, unknown>, modelId: string, signal?: AbortSignal): Promise<unknown> {
-        const parsed = await this.completeText(prompt, schema, modelId, signal);
+    public async generate(
+        prompt: string,
+        schema: Record<string, unknown>,
+        modelId: string,
+        signal?: AbortSignal,
+        options?: LocalGenerateTextOptions,
+    ): Promise<unknown> {
+        const parsed = await this.completeText(prompt, schema, modelId, signal, options);
         let result: unknown;
         try {
             result = JSON.parse(parsed.content);
@@ -807,7 +813,7 @@ export class LocalAiRuntime implements LocalAiService {
         return {
             model: modelId,
             messages: [{ role: 'user', content: prompt }],
-            stream: false, temperature: options?.temperature ?? DEFAULT_TEMPERATURE, top_p: 0.95, top_k: 20,
+            stream: false, temperature: options?.temperature ?? DEFAULT_TEMPERATURE, top_p: options?.topP ?? 0.95, top_k: 20,
             max_tokens: MAX_COMPLETION_TOKENS,
             ...(schema ? { response_format: { type: 'json_object', schema } } : {}),
             ...(options?.grammar ? { grammar: options.grammar } : {}),

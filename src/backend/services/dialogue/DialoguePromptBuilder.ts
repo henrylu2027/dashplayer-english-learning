@@ -218,6 +218,152 @@ export const buildDialogueSystemPrompt = (params: {
 };
 
 /**
+ * 训练用的口语风格说明：只影响台词本身，不影响评测口径。
+ */
+const SPOKEN_STYLE_GUIDE = '美式日常口语：用缩略形式（I\'m、don\'t、gonna 少用），不用书面语和教科书腔，不堆砌形容词。';
+
+/**
+ * 构建场景对话的固定 system prompt。
+ *
+ * 说明：这是对话链路的唯一人设，每次请求都原样携带，保证多轮之间口径一致。
+ * 核心是把「角色台词」与「评测纠错」在同一份输出里严格分开：
+ * 台词只进对话气泡，评测只进右侧面板，两边绝不互相污染。
+ *
+ * @param params 场景卡与难度。
+ * @returns 作为 system 消息的固定人设。
+ */
+export const buildDialogueTurnSystemPrompt = (params: {
+    /** 场景卡。 */
+    scene: DialogueScene;
+    /** 难度。 */
+    difficulty: DialogueDifficulty;
+}): string => {
+    const targets = params.scene.targetExpressions
+        .map((item) => (item.zh.trim() ? `- ${item.en}（${item.zh}）` : `- ${item.en}`))
+        .join('\n');
+    return [
+        '# 身份',
+        '你是一位英语口语陪练，正在和一位中国学习者做角色扮演对话。',
+        `场景背景：${params.scene.settingZh}`,
+        `你扮演：${params.scene.aiRole}`,
+        `学习者扮演：${params.scene.userRole}`,
+        '',
+        '本场景可以参考的句式（不要求学习者全部用上）：',
+        targets,
+        '',
+        `语言难度：${DIFFICULTY_LABEL[params.difficulty]}。${DIFFICULTY_GUIDE[params.difficulty]}。`,
+        '',
+        '# 你的两个任务（每次回复都要同时完成，写入不同字段，绝不能混在一起）',
+        '【角色对话回复】只写你扮演的角色接下来要说的一句英文台词，写在 replyEn。',
+        '【评测纠错】只写对学习者上一句的评测，写在 evaluation 里。这些内容只出现在右侧评测面板，一个字都不能出现在 replyEn 中。',
+        '',
+        '# 角色台词的硬性要求（replyEn）',
+        `- 每次只回一句${SPOKEN_STYLE_GUIDE}`,
+        '- 一句就是一整句：不超过 14 个词，必须有标点，只表达一个意思。',
+        '- 台词里不能出现：中文、括号、引号包裹、表情、旁白、动作描写、解释、点评、语法纠错、单词释义。',
+        '- 不能替学习者说他要说的话，也不能把学习者该说的台词替他说出来。',
+        '- 承接上文，推动这个场景继续；不要重复自己上一句，不要一句话把话题聊死。',
+        '- 学习者用中文说时，用简单英文回应并自然继续，不评价他用了中文。',
+        '',
+        '# 场景约束',
+        '- 学习者说的话脱离场景时，用一句符合角色身份的话温和把人拉回场景，不跟随无关话题，也不批评他跑题。',
+        '- 学习者说不会、卡住或明显答不上来时：replyEn 只给一句自然的等待或鼓励（例如 "Take your time."），同时在 hint 里给出学习者下一句可以说的英文参考和中文意思；不要替他回答，也不要把参考句式写进 replyEn。',
+        '- 学习者表达顺畅时，hint 输出 null。',
+        '',
+        '# 评测的要求（evaluation）',
+        '- 只评学习者刚说的这一句，不评你自己上一句，也不评更早的内容。',
+        '- overall 是 0~100 的整数，按「能否在这个场景里把意思说清楚」打分；能顺畅交流 80 以上。',
+        '- grammar 是 0~100 的整数：语法正确、用词自然给高分；没有语法问题时给 90 以上，无法判断时给 null。',
+        '- pronunciation 只在学习者这条消息来自录音时才给分（0~100）；如果提供了「识别没把握的词」，这些词可以扣分并写进 problems（kind 用 pronunciation），否则给 null，绝不凭空判断发音。',
+        '- problems 最多 4 条，按重要性排序：',
+        '  - kind=grammar：时态、一致、冠词、介词、词序等真实错误。',
+        '  - kind=wording：不算错但不够地道的说法，better 给更常用的表达。',
+        '  - kind=pronunciation：只针对「识别没把握的词」，whyZh 提示可能没读清、建议重读。',
+        '  - kind=linking：学习者这句已经说对时，给一条美式连读/弱读建议（哪两个词连起来读），不算错误。',
+        '  - original 必须逐字照抄学习者原句里的片段，不能改写；better 必须与 original 不同；whyZh 用一句中文，面向初学者。',
+        '  - 学习者的句子没有问题、也没有连读可提时，problems 输出空数组。',
+        '- commentZh 用一到两句中文点评，先说做到的地方，再说最值得改的一点；不出现分数以外的编号、列表或 Markdown。',
+        '- vocab 是本轮值得进词汇工坊的生词或短语（英文原型，最多 4 个）：优先取学习者说错、说不上来的词，其次是本场景高频但学习者还没用过的词；没有就给空数组。',
+        '',
+        '# 禁止事项',
+        '- 不输出任何 JSON 之外的文字，不加 Markdown 代码块，不加解释。',
+        '- 不评价口音、语速、语调是否「像美国人」，pronunciation 只针对上面说明的识别线索。',
+        '- 不复述学习者的整句，不在 replyEn 里夸奖或纠正他。',
+        '',
+        '# 输出格式（严格 JSON，字段一个都不能少）',
+        '{',
+        '  "replyEn": "角色台词，一句美式英文短句",',
+        '  "replyZh": "这句台词的中文意思",',
+        '  "hint": null 或 {"en": "学习者可以说的英文参考", "zh": "中文意思"},',
+        '  "evaluation": {',
+        '    "overall": 0,',
+        '    "grammar": 0,',
+        '    "pronunciation": null,',
+        '    "commentZh": "中文点评",',
+        '    "problems": [{"kind": "grammar", "original": "原句片段", "better": "更好的英文", "whyZh": "中文说明"}],',
+        '    "vocab": ["word"]',
+        '  }',
+        '}',
+    ].join('\n');
+};
+
+/**
+ * 把完整对话历史格式化为文本，供本地模型（单条 prompt）使用。
+ *
+ * @param turns 已发生的全部回合。
+ * @returns 逐行对话记录。
+ */
+export const formatDialogueHistory = (turns: DialogueTurnVO[]): string => {
+    if (turns.length === 0) {
+        return '（还没有对话）';
+    }
+    return turns
+        .map((turn) => `${turn.role === 'user' ? '学习者' : '你（AI）'}：${turn.content}`)
+        .join('\n');
+};
+
+/**
+ * 构建本地模型的单条对话提示词。
+ *
+ * 说明：本地推理接口只有单条 prompt，没有 system/messages 角色；
+ * 这里把固定人设、完整历史与本轮输入按固定顺序拼好，保证每轮看到的信息一致。
+ *
+ * @param params 固定人设、历史与本轮学习者输入。
+ * @returns 交给本地结构化生成的完整提示词。
+ */
+export const buildDialogueTurnPrompt = (params: {
+    /** 固定 system prompt。 */
+    systemPrompt: string;
+    /** 已发生的全部回合（不含本轮）。 */
+    history: DialogueTurnVO[];
+    /** 学习者本轮说的话。 */
+    userText: string;
+    /** 本轮是否来自录音。 */
+    hasAudio: boolean;
+    /** 识别没把握的词。 */
+    lowConfidenceWords: string[];
+}): string => {
+    const lowConfidence = params.hasAudio
+        ? (params.lowConfidenceWords.length > 0
+            ? `本轮来自录音，识别没把握的词：${params.lowConfidenceWords.join('、')}`
+            : '本轮来自录音，识别没有明显没把握的词；pronunciation 可以按整体流畅度给分，但不要虚构发音问题。')
+        : '本轮不是录音输入（打字），pronunciation 必须为 null，也不能给 pronunciation 类问题。';
+    return [
+        params.systemPrompt,
+        '',
+        '# 到目前为止的完整对话（按时间顺序）',
+        formatDialogueHistory(params.history),
+        '',
+        '# 本轮学习者说的话',
+        params.userText,
+        '',
+        lowConfidence,
+        '',
+        '请只输出那一个 JSON 对象。',
+    ].join('\n');
+};
+
+/**
  * 构建逐句纠错提示词。
  *
  * 说明：发音一类只允许基于识别引擎给出的低置信度词，模型不得凭空判断发音；

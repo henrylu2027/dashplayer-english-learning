@@ -15,6 +15,10 @@ export const dialogueTurn = sqliteTable('dp_dialogue_turn', {
     card_id: integer('card_id', { mode: 'number' }),
     /** 逐句纠错 JSON；未请求或助手的发言为空。 */
     correction_json: text('correction_json'),
+    /** 逐轮评测 JSON；只有学习者发言且由对话模型给出时存在。 */
+    evaluation_json: text('evaluation_json'),
+    /** 助手台词的中文意思；学习者回合为空。 */
+    reply_zh: text('reply_zh'),
     created_at: integer('created_at', { mode: 'number' }).notNull(),
 }, (table) => ({
     sessionIdx: index('dp_dialogue_turn_session_idx').on(table.session_id, table.created_at),

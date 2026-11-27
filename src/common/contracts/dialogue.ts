@@ -163,6 +163,80 @@ export interface DialogueSessionSummary {
 }
 
 /**
+ * 逐轮评测里的一条纠错/建议。
+ *
+ * 与旧的逐句纠错相比多了 linking（连读/弱读）一类：
+ * 连读建议只针对学习者已经说对的句子，属于锦上添花，不当作错误处理。
+ */
+export const dialogueTurnProblemSchema = z.object({
+    /** 问题类型。 */
+    kind: z.enum(['grammar', 'wording', 'pronunciation', 'linking']),
+    /** 学习者原句片段，必须照抄。 */
+    original: z.string().min(1),
+    /** 更自然或更正确的英文；连读类给出连起来读的写法。 */
+    better: z.string().min(1),
+    /** 一句中文说明。 */
+    whyZh: z.string().min(1),
+});
+
+/** 逐轮评测里的纠错类型。 */
+export type DialogueTurnProblem = z.infer<typeof dialogueTurnProblemSchema>;
+
+/**
+ * 一轮学习者发言的评测结果。
+ *
+ * 由对话模型在同一次回复里给出，只进右侧评测面板，绝不进入对话气泡。
+ */
+export const dialogueTurnEvaluationSchema = z.object({
+    /** 综合得分 0~100。 */
+    overall: z.number().int().min(0).max(100),
+    /** 发音/流利度印象分 0~100；没有录音或无从判断时为 null。 */
+    pronunciation: z.number().int().max(100).nullable(),
+    /** 语法分 0~100；没有语法问题记满分，无从判断时为 null。 */
+    grammar: z.number().int().max(100).nullable(),
+    /** 一句中文点评，面向初学者。 */
+    commentZh: z.string().min(1),
+    /** 语法/用词/发音/连读建议。 */
+    problems: z.array(dialogueTurnProblemSchema).max(4),
+    /** 本轮生词/短语，供词汇工坊入库。 */
+    vocab: z.array(z.string()).max(6),
+});
+
+/** 逐轮评测结果类型。 */
+export type DialogueTurnEvaluation = z.infer<typeof dialogueTurnEvaluationSchema>;
+
+/** 卡壳提示：学习者不会说时给出的参考句式。 */
+export const dialogueTurnHintSchema = z.object({
+    /** 参考英文。 */
+    en: z.string().min(1),
+    /** 中文释义。 */
+    zh: z.string(),
+});
+
+/** 卡壳提示类型。 */
+export type DialogueTurnHint = z.infer<typeof dialogueTurnHintSchema>;
+
+/**
+ * 对话模型一轮回复的结构化输出契约。
+ *
+ * 说明：角色台词与评测纠错在同一个 JSON 里严格分开——
+ * replyEn 是气泡里唯一的文字，其余字段全部只进右侧面板。
+ */
+export const dialogueTurnReplySchema = z.object({
+    /** 角色台词：一句美式短句。 */
+    replyEn: z.string().min(1),
+    /** 台词的中文意思；可以为空。 */
+    replyZh: z.string(),
+    /** 学习者卡壳时给出的参考句式；没有卡壳时为 null。 */
+    hint: dialogueTurnHintSchema.nullable(),
+    /** 对学习者上一句的评测。 */
+    evaluation: dialogueTurnEvaluationSchema,
+});
+
+/** 对话模型一轮回复的草稿类型。 */
+export type DialogueTurnReplyDraft = z.infer<typeof dialogueTurnReplySchema>;
+
+/**
  * 一条对话回合。
  */
 export interface DialogueTurnVO {
@@ -170,14 +244,50 @@ export interface DialogueTurnVO {
     id: number;
     /** 说话方。 */
     role: DialogueRole;
-    /** 文本内容。 */
+    /** 文本内容；助手回合只有英文台词。 */
     content: string;
     /** 该回合被加入复习后的卡片 ID；未加入时为 null。 */
     cardId: number | null;
-    /** 该回合的逐句纠错；未请求或助手发言时为 null。 */
+    /** 该回合的逐句纠错；旧的「逐句纠错」链路使用，未请求或助手发言时为 null。 */
     correction: DialogueCorrection | null;
+    /** 该回合的逐轮评测；只有学习者发言且由对话模型给出时存在。 */
+    evaluation: DialogueTurnEvaluation | null;
+    /** 助手台词的中文意思；学习者回合为 null。 */
+    replyZh: string | null;
     /** 记录时间，epoch 毫秒。 */
     createdAt: number;
+}
+
+/**
+ * 一轮对话请求：学习者说了一句，模型回一句并评测这句。
+ */
+export interface DialogueReplyTurnRequest {
+    /** 对话数据库主键。 */
+    sessionId: number;
+    /** 学习者说的话。 */
+    text: string;
+    /**
+     * 语音识别置信度低的词；打字输入时为空。
+     * 只用来提示「可能没读清」，不作为发音对错的依据。
+     */
+    lowConfidenceWords?: string[];
+    /**
+     * 本轮使用的难度；界面在对话中途切换难度时传入，缺省沿用会话创建时的值。
+     * 只影响这一轮的句式复杂度，不改写已落库的会话。
+     */
+    difficulty?: DialogueDifficulty;
+}
+
+/**
+ * 一轮对话结果：两条回合都已在后端落库。
+ */
+export interface DialogueReplyTurnResult {
+    /** 学习者的发言（含评测）。 */
+    userTurn: DialogueTurnVO;
+    /** AI 的角色台词。 */
+    assistantTurn: DialogueTurnVO;
+    /** 卡壳提示；没有时为 null。 */
+    hint: DialogueTurnHint | null;
 }
 
 /**
