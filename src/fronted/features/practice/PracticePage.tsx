@@ -575,9 +575,8 @@ export default function PracticePage() {
                             )}
                         </section>
 
-                        {/* 评测结果 */}
-                        {hasResult && (
-                            <section className="rounded-2xl border border-border/60 bg-card p-5 shadow-xs">
+                        {/* 评测结果：常驻，未评测时显示占位 */}
+                        <section className="rounded-2xl border border-border/60 bg-card p-5 shadow-xs">
                                 <div className="flex flex-wrap items-center justify-between gap-2">
                                     <h2 className="text-sm font-medium text-foreground">{t('practice.resultTitle')}</h2>
                                     <span className="text-xs text-muted-foreground">{t('practice.resultHint')}</span>
@@ -594,6 +593,13 @@ export default function PracticePage() {
                                     </div>
 
                                     <div className="grid flex-1 grid-cols-3 gap-2">
+                                        {!hasResult && (
+                                            <>
+                                                <Metric label={t('practice.pronunciation')} value="—" />
+                                                <Metric label={t('practice.grammar')} value="—" />
+                                                <Metric label={t('practice.wrongWords')} value="—" />
+                                            </>
+                                        )}
                                         {dictation && (
                                             <>
                                                 <Metric
@@ -776,8 +782,7 @@ export default function PracticePage() {
                                         <Play className="ml-1 h-3.5 w-3.5" />
                                     </Button>
                                 </div>
-                            </section>
-                        )}
+                        </section>
 
                         {/* 最近练习 */}
                         <section className="rounded-2xl border border-border/60 bg-card p-4 shadow-xs">
@@ -825,7 +830,7 @@ export default function PracticePage() {
 
                     {/* 右侧：句子队列（每句一条原声） */}
                     <aside className="flex min-w-0 flex-col gap-3">
-                        <section className="flex flex-col rounded-2xl border border-border/60 bg-card p-3 shadow-xs">
+                        <section className="flex min-h-0 flex-1 flex-col rounded-2xl border border-border/60 bg-card p-3 shadow-xs">
                             <Button
                                 type="button"
                                 size="sm"
@@ -848,7 +853,7 @@ export default function PracticePage() {
                             ) : (
                                 <div
                                     ref={queueListRef}
-                                    className="mt-2 flex max-h-[520px] min-h-0 flex-col gap-1 overflow-y-auto pr-1"
+                                    className="mt-2 flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto pr-1"
                                 >
                                     {queue.map((item, index) => (
                                         <div
