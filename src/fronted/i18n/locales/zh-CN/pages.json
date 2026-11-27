@@ -214,6 +214,8 @@
         "wpm": "语速",
         "wpmUnit": "词/分",
         "detailTitle": "逐词对比",
+        "detailPlaceholder": "提交评测后在这里显示逐词对比",
+        "summaryPlaceholder": "录音时长、参考词数与读对词数会显示在这里",
         "legendCorrect": "读对",
         "legendMispronounced": "读错",
         "legendMissing": "漏读",

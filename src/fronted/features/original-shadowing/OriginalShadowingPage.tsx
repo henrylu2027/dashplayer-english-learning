@@ -129,8 +129,11 @@ export default function OriginalShadowingPage() {
     const videoId = useFile((s) => s.videoId);
 
     const [mode, setMode] = useState<QueueMode>('sequence');
-    const [entries, setEntries] = useState<QueueEntry[]>([]);
-    const [selectedId, setSelectedId] = useState<string | null>(null);
+    // 两种队列各自常驻：切换模式只换显示，不销毁对方的列表与选中句
+    const [sequenceEntries, setSequenceEntries] = useState<QueueEntry[]>([]);
+    const [srsEntries, setSrsEntries] = useState<QueueEntry[]>([]);
+    const [sequenceSelectedId, setSequenceSelectedId] = useState<string | null>(null);
+    const [srsSelectedId, setSrsSelectedId] = useState<string | null>(null);
     const [audioPhase, setAudioPhase] = useState<AudioPhase>('idle');
     const [evaluating, setEvaluating] = useState(false);
     const [savingWords, setSavingWords] = useState(false);
@@ -141,6 +144,10 @@ export default function OriginalShadowingPage() {
     const recorded = useRecordedAttempt();
     const audioRef = useRef<HTMLAudioElement | null>(null);
     const autoNextTimerRef = useRef<number | null>(null);
+
+    const entries = mode === 'sequence' ? sequenceEntries : srsEntries;
+    const selectedId = mode === 'sequence' ? sequenceSelectedId : srsSelectedId;
+    const setSelectedId = mode === 'sequence' ? setSequenceSelectedId : setSrsSelectedId;
 
     const selected = entries.find((entry) => entry.id === selectedId) ?? null;
 
@@ -254,7 +261,7 @@ export default function OriginalShadowingPage() {
         recorded.reset();
         setResult(null);
         setOutcome(null);
-    }, [entries, recorded]);
+    }, [entries, recorded, setSelectedId]);
 
     /** 顺序跟读：把当前视频全部分句一次性加入队列，保持视频原有顺序。 */
     const importWholeVideo = (): void => {
@@ -275,8 +282,8 @@ export default function OriginalShadowingPage() {
         recorded.reset();
         setResult(null);
         setOutcome(null);
-        setEntries(next);
-        setSelectedId(next[0]?.id ?? null);
+        setSequenceEntries(next);
+        setSequenceSelectedId(next[0]?.id ?? null);
         toast.success(t('originalShadowing.imported', { count: next.length }));
     };
 
@@ -287,21 +294,29 @@ export default function OriginalShadowingPage() {
             return;
         }
         const id = `${currentSentence.fileHash}-${currentSentence.index}`;
-        if (entries.some((entry) => entry.id === id)) {
-            toast.success(t('originalShadowing.alreadyQueued'));
-            setSelectedId(id);
-            return;
+        // 视频句只进顺序队列；间隔复习队列由 SRS 推送，不掺入视频句
+        const already = sequenceEntries.some((entry) => entry.id === id);
+        if (!already) {
+            const entry: QueueEntry = {
+                id,
+                text: currentSentence.text.trim(),
+                source: buildVideoShadowingSource(currentSentence, videoPath, subtitlePath),
+                status: 'pending',
+                score: null,
+            };
+            setSequenceEntries((prev) => [...prev, entry]);
         }
-        const entry: QueueEntry = {
-            id,
-            text: currentSentence.text.trim(),
-            source: buildVideoShadowingSource(currentSentence, videoPath, subtitlePath),
-            status: 'pending',
-            score: null,
-        };
-        setEntries((prev) => [...prev, entry]);
-        setSelectedId((prev) => prev ?? id);
-        toast.success(t('originalShadowing.addedOne'));
+        if (mode !== 'sequence') {
+            // 从间隔复习切回顺序跟读，把刚加入的句子选上
+            clearAutoNext();
+            stopAudio();
+            recorded.reset();
+            setResult(null);
+            setOutcome(null);
+            setMode('sequence');
+        }
+        setSequenceSelectedId(id);
+        toast.success(already ? t('originalShadowing.alreadyQueued') : t('originalShadowing.addedOne'));
     };
 
     /** 间隔复习：拉取到期卡片作为队列。 */
@@ -330,8 +345,8 @@ export default function OriginalShadowingPage() {
             recorded.reset();
             setResult(null);
             setOutcome(null);
-            setEntries(next);
-            setSelectedId(next[0]?.id ?? null);
+            setSrsEntries(next);
+            setSrsSelectedId(next[0]?.id ?? null);
         } catch (error) {
             logger.error('加载复习队列失败', { error });
             toast.error(error instanceof Error ? error.message : t('srs.loadFailed'));
@@ -348,28 +363,27 @@ export default function OriginalShadowingPage() {
         if (next === mode) {
             return;
         }
-        setMode(next);
-        if (next === 'srs') {
-            void loadSrsQueue();
-            return;
-        }
-        // 回到顺序跟读：清掉复习卡队列，避免两种来源混在同一个列表里
+        // 两种队列各自保留：切换只换显示与选中句，不清空视频原句队列
         clearAutoNext();
         stopAudio();
         recorded.reset();
         setResult(null);
         setOutcome(null);
-        setEntries([]);
-        setSelectedId(null);
+        setMode(next);
+        if (next === 'srs') {
+            void loadSrsQueue();
+        }
     };
 
-    /** 把评测结果写回队列条目。 */
+    /** 把评测结果写回队列条目；两种队列 ID 前缀不同，同时更新互不影响。 */
     const applyEntryResult = (entryId: string, score: number, passed: boolean): void => {
-        setEntries((prev) => prev.map((entry) => (
+        const patch = (prev: QueueEntry[]): QueueEntry[] => prev.map((entry) => (
             entry.id === entryId
                 ? { ...entry, status: passed ? 'passed' : 'failed', score }
                 : entry
-        )));
+        ));
+        setSequenceEntries(patch);
+        setSrsEntries(patch);
     };
 
     /**
@@ -840,7 +854,8 @@ export default function OriginalShadowingPage() {
                             </p>
                         </section>
 
-                        {result && <ScorePanel result={result} />}
+                        {/* 逐词对比常驻：无结果时按同一版式显示占位 */}
+                        <ScorePanel result={result} />
                     </div>
                 </div>
             </div>

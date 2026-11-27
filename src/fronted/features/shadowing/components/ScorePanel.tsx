@@ -44,15 +44,21 @@ const LEGEND: Array<{ status: ShadowingWordStatus; dotClass: string; labelKey: s
 
 /**
  * 跟读评分结果面板：综合分、分项指标、逐词对比与识别原文。
+ *
+ * 常驻显示：没有结果时按同一版式渲染占位，切换句子或重新录音时页面不跳动。
  */
-export default function ScorePanel({ result }: { result: ShadowingScoreVO }) {
+export default function ScorePanel({ result }: { result: ShadowingScoreVO | null }) {
     const { t } = useTranslation('pages');
-    const tone = scoreTone(result.score);
+    const tone = scoreTone(result?.score ?? 0);
 
     const metrics = [
-        { label: t('shadowing.accuracy'), value: `${result.accuracy}%` },
-        { label: t('shadowing.completeness'), value: `${result.completeness}%` },
-        { label: t('shadowing.wpm'), value: `${result.wordsPerMinute}`, unit: t('shadowing.wpmUnit') },
+        { label: t('shadowing.accuracy'), value: result ? `${result.accuracy}%` : '—' },
+        { label: t('shadowing.completeness'), value: result ? `${result.completeness}%` : '—' },
+        {
+            label: t('shadowing.wpm'),
+            value: result ? `${result.wordsPerMinute}` : '—',
+            unit: result ? t('shadowing.wpmUnit') : undefined,
+        },
     ];
 
     return (
@@ -61,12 +67,17 @@ export default function ScorePanel({ result }: { result: ShadowingScoreVO }) {
                 <div
                     className={cn(
                         'flex h-24 w-24 shrink-0 flex-col items-center justify-center rounded-2xl ring-1',
-                        tone.bg,
-                        tone.ring,
+                        result ? tone.bg : 'bg-muted/40',
+                        result ? tone.ring : 'ring-border/60',
                     )}
                 >
-                    <span className={cn('text-3xl font-semibold tabular-nums leading-none', tone.text)}>
-                        {result.score}
+                    <span
+                        className={cn(
+                            'text-3xl font-semibold tabular-nums leading-none',
+                            result ? tone.text : 'text-muted-foreground',
+                        )}
+                    >
+                        {result ? result.score : '—'}
                     </span>
                     <span className="mt-1.5 text-xs text-muted-foreground">{t('shadowing.overall')}</span>
                 </div>
@@ -102,42 +113,48 @@ export default function ScorePanel({ result }: { result: ShadowingScoreVO }) {
                     </div>
                 </div>
 
-                <p className="mt-2 text-lg leading-8 text-foreground">
-                    {result.words.map((word, index) => {
-                        const title = word.status === 'mispronounced' && word.actual
-                            ? t('shadowing.heardAs', { word: word.actual })
-                            : word.status === 'missing'
-                                ? t('shadowing.missingHint')
-                                : word.status === 'extra'
-                                    ? t('shadowing.extraHint')
-                                    : undefined;
-                        return (
-                            <span
-                                // 逐词反馈是静态列表，用位置作 key 足够稳定
-                                key={`${index}-${word.status}`}
-                                title={title}
-                                className={cn('mx-0.5', WORD_STATUS_CLASS[word.status])}
-                            >
-                                {word.expected ?? word.actual}
-                            </span>
-                        );
-                    })}
+                <p className={cn('mt-2 text-lg leading-8', result ? 'text-foreground' : 'text-muted-foreground')}>
+                    {result ? (
+                        result.words.map((word, index) => {
+                            const title = word.status === 'mispronounced' && word.actual
+                                ? t('shadowing.heardAs', { word: word.actual })
+                                : word.status === 'missing'
+                                    ? t('shadowing.missingHint')
+                                    : word.status === 'extra'
+                                        ? t('shadowing.extraHint')
+                                        : undefined;
+                            return (
+                                <span
+                                    // 逐词反馈是静态列表，用位置作 key 足够稳定
+                                    key={`${index}-${word.status}`}
+                                    title={title}
+                                    className={cn('mx-0.5', WORD_STATUS_CLASS[word.status])}
+                                >
+                                    {word.expected ?? word.actual}
+                                </span>
+                            );
+                        })
+                    ) : (
+                        <span className="text-sm">{t('shadowing.detailPlaceholder')}</span>
+                    )}
                 </p>
             </div>
 
             <div className="mt-4 border-t border-border/50 pt-3">
                 <div className="text-xs text-muted-foreground">{t('shadowing.recognized')}</div>
-                <p className="mt-1 text-sm text-foreground/90">
-                    {result.recognizedText || t('shadowing.noRecognized')}
+                <p className="mt-1 min-h-5 text-sm text-foreground/90">
+                    {result ? (result.recognizedText || t('shadowing.noRecognized')) : '—'}
                 </p>
             </div>
 
-            <div className="mt-3 text-xs text-muted-foreground">
-                {t('shadowing.summary', {
-                    duration: result.durationSec.toFixed(1),
-                    reference: result.referenceWordCount,
-                    correct: result.correctWordCount,
-                })}
+            <div className="mt-3 min-h-4 text-xs text-muted-foreground">
+                {result
+                    ? t('shadowing.summary', {
+                        duration: result.durationSec.toFixed(1),
+                        reference: result.referenceWordCount,
+                        correct: result.correctWordCount,
+                    })
+                    : t('shadowing.summaryPlaceholder')}
             </div>
         </section>
     );

@@ -214,6 +214,8 @@
         "wpm": "Pace",
         "wpmUnit": "wpm",
         "detailTitle": "Word-by-word",
+        "detailPlaceholder": "Submit a take to see the word-by-word comparison",
+        "summaryPlaceholder": "Recording duration, reference words and correct words will appear here",
         "legendCorrect": "Correct",
         "legendMispronounced": "Misspoken",
         "legendMissing": "Missed",
