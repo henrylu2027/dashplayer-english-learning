@@ -191,8 +191,8 @@ const MAX_CORRECTION_ITEMS = 4;
 const DIALOGUE_TEMPERATURE = 0.65;
 const DIALOGUE_TOP_P = 0.8;
 
-/** 角色台词词数兜底上限；提示词要求一句且不超过 14 词，超出时只保留第一句。 */
-const MAX_REPLY_WORDS = 24;
+/** 角色台词词数兜底上限；回应+问句通常略长，超过只记日志不截断。 */
+const MAX_REPLY_WORDS = 30;
 
 /** 台词为空时的兜底；宁可让学习者重说，也不把空白气泡发出去。 */
 const FALLBACK_REPLY = 'Sorry, could you say that again?';
@@ -597,13 +597,24 @@ export class DialogueServiceImpl implements DialogueService {
             difficulty,
             mode: record.session.mode,
         });
-        const draft = await this.generateTurnReply({
+        let draft = await this.generateTurnReply({
             systemPrompt,
             history: turns,
             userText: text,
             backend: record.session.backend,
         });
-        const reply = this.sanitizeReply(draft.ai_reply);
+        let reply = this.sanitizeReply(draft.ai_reply);
+        // 缺了追问就等于把对话聊死：带着纠正提示重来一次，仍缺就照原样展示
+        if (!reply.includes('?')) {
+            this.logger.info('dialogue reply missing follow-up question', { sessionId: request.sessionId });
+            draft = await this.generateTurnReply({
+                systemPrompt,
+                history: turns,
+                userText: `${text}\n\n（上一次回复只做了回应、没有追问。请重写：先贴合场景简短回应，再紧跟一个和主线相关的问题，把对话交回用户；整体一句美式短句。）`,
+                backend: record.session.backend,
+            });
+            reply = this.sanitizeReply(draft.ai_reply);
+        }
         const evaluation = this.sanitizeEvaluation(draft, text);
         const userTurn = await this.dialogueRepository.appendTurn({
             sessionId: request.sessionId,
@@ -857,9 +868,13 @@ export class DialogueServiceImpl implements DialogueService {
             .replace(/\s+/g, ' ')
             .trim();
         // 只取第一句：一句一句聊，避免模型一次说一大段
-        const firstSentence = text.split(/(?<=[.!?])\s+/).find((part) => part.trim().length > 0);
-        if (firstSentence) {
-            text = firstSentence.trim();
+        // 台词结构是「简短回应 + 问句」，最多保留两句；有问句时连同它前面那句一起留下
+        const parts = text.split(/(?<=[.!?])\s+/).filter((part) => part.trim().length > 0);
+        if (parts.length > 2) {
+            const questionIndex = parts.findIndex((part) => part.includes('?'));
+            text = questionIndex >= 0
+                ? parts.slice(Math.max(0, questionIndex - 1), questionIndex + 1).join(' ').trim()
+                : parts[0].trim();
         }
         if (tokenizeForScoring(text).length > MAX_REPLY_WORDS) {
             this.logger.warn('dialogue reply longer than expected', { words: tokenizeForScoring(text).length });
