@@ -12,6 +12,7 @@ import type {
     DialogueModelBackend,
     DialogueReview,
     DialogueScene,
+    DialogueSceneMode,
     DialogueScript,
     DialogueSessionSummary,
     DialogueSpeaker,
@@ -34,7 +35,6 @@ import HistoryList from './components/HistoryList';
 import ReviewPanel from './components/ReviewPanel';
 import SceneCardView from './components/SceneCardView';
 import SceneSetupCard from './components/SceneSetupCard';
-import SpeechScorePanel from './components/SpeechScorePanel';
 
 const logger = getRendererLogger('DialoguePage');
 
@@ -60,6 +60,8 @@ export default function DialoguePage() {
     const videoId = useFile((state) => state.videoId);
 
     const [availability, setAvailability] = useState<DialogueAvailability | null>(null);
+    const [mode, setMode] = useState<DialogueSceneMode>('video');
+    const [topic, setTopic] = useState('');
     const [difficulty, setDifficulty] = useState<DialogueDifficulty>('basic');
     const [backend, setBackend] = useState<DialogueModelBackend>('local');
     const [creating, setCreating] = useState(false);
@@ -76,7 +78,6 @@ export default function DialoguePage() {
     /** 剧本角色名：默认留空，界面回落到「说话人 A/B」，学习者可改成视频里的名字。 */
     const [roleAName, setRoleAName] = useState('');
     const [roleBName, setRoleBName] = useState('');
-    const [learnerRole, setLearnerRole] = useState<DialogueSpeaker>('a');
     /** 右侧原片台词面板是否展开。 */
     const [railOpen, setRailOpen] = useState(true);
     /** 只在首次拿到可用性时选默认后端，之后不覆盖用户的选择。 */
@@ -173,7 +174,7 @@ export default function DialoguePage() {
                 lines: [toScriptLine(currentSentence.index, currentSentence.text, currentSentence.textZH, 'a')],
                 roleAName: resolvedRoleA,
                 roleBName: resolvedRoleB,
-                learnerRole,
+                learnerRole: 'a',
             };
         }
         return {
@@ -188,9 +189,9 @@ export default function DialoguePage() {
             )),
             roleAName: resolvedRoleA,
             roleBName: resolvedRoleB,
-            learnerRole,
+            learnerRole: 'a',
         };
-    }, [currentSentence, sentences, resolvedRoleA, resolvedRoleB, learnerRole]);
+    }, [currentSentence, sentences, resolvedRoleA, resolvedRoleB]);
 
     /**
      * 收集当前视频里学习者练过的台词，作为场景取材。
@@ -273,7 +274,7 @@ export default function DialoguePage() {
     }, []);
 
     const handleCreate = async (): Promise<void> => {
-        if (!currentSentence) {
+        if (mode === 'video' && !currentSentence) {
             return;
         }
         setCreating(true);
@@ -281,9 +282,27 @@ export default function DialoguePage() {
         setReview(null);
         setHistoryDetail(null);
         try {
+            if (mode === 'custom') {
+                const result = await dialogueApi.create({
+                    mode: 'custom',
+                    topic,
+                    anchorText: topic,
+                    paragraphLines: [],
+                    source: { kind: 'free' },
+                    difficulty,
+                    backend,
+                });
+                setActive({ session: result.session, scene: result.scene, script: result.script });
+                await refreshHistory();
+                return;
+            }
+            if (!currentSentence) {
+                return;
+            }
             // 有剧本时场景围绕真实台词展开，不再去翻练习记录取材
             const focusLines = script ? [] : await collectFocusLines();
             const result = await dialogueApi.create({
+                mode: 'video',
                 anchorText: currentSentence.text,
                 paragraphLines,
                 focusLines,
@@ -404,12 +423,11 @@ export default function DialoguePage() {
                                                 {' · '}
                                                 {turn.evaluation.commentZh}
                                             </div>
-                                            {turn.evaluation.problems.map((problem) => (
-                                                <div key={`${problem.kind}-${problem.original}`} className="mt-0.5">
-                                                    <span className="text-foreground/70 line-through">{problem.original}</span>
-                                                    <span className="mx-1 text-muted-foreground">→</span>
-                                                    <span className="text-foreground">{problem.better}</span>
-                                                    <span className="ml-1 text-muted-foreground">{problem.whyZh}</span>
+                                            {turn.evaluation.errorList.map((item) => (
+                                                <div key={`${item.type}-${item.word}`} className="mt-0.5">
+                                                    <span className="text-muted-foreground">{item.type}</span>
+                                                    <span className="ml-1 text-foreground">{item.word}</span>
+                                                    <span className="ml-1 text-muted-foreground">{item.desc}</span>
                                                 </div>
                                             ))}
                                             {turn.evaluation.vocab.length > 0 && (
@@ -461,42 +479,13 @@ export default function DialoguePage() {
                 />
             );
         }
-        if (!currentSentence) {
-            return (
-                <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_380px]">
-                    <div className="flex flex-col items-center justify-center gap-3 rounded-2xl border border-border/60 bg-card px-6 py-14 text-center shadow-xs">
-                        <MessagesSquare className="h-8 w-8 text-muted-foreground/40" />
-                        <h3 className="text-base font-medium text-foreground/80">{t('dialogue.noSentenceTitle')}</h3>
-                        <p className="max-w-sm text-xs leading-5 text-muted-foreground">{t('dialogue.noSentenceGuide')}</p>
-                        <Button
-                            type="button"
-                            size="sm"
-                            className="mt-1 h-8 rounded-lg px-3 text-xs"
-                            onClick={() => navigate(videoId ? `/player/${videoId}?sideBarAnimation=false` : '/home')}
-                        >
-                            <ArrowLeft className="mr-1 h-3.5 w-3.5" />
-                            {t('dialogue.goPlayer')}
-                        </Button>
-                    </div>
-                    <SpeechScorePanel
-                        result={null}
-                        pending={false}
-                        disabled
-                        savingWords={false}
-                        onAddWords={() => undefined}
-                        onRetry={() => undefined}
-                        onContinue={() => undefined}
-                    />
-                </div>
-            );
-        }
         return (
             <div className={cn(
                 'grid min-h-0 gap-4',
-                script && railOpen && 'lg:grid-cols-[minmax(0,1fr)_320px]',
+                script && mode === 'video' && railOpen && 'lg:grid-cols-[minmax(0,1fr)_320px]',
             )}>
                 <div className="flex min-w-0 flex-col gap-4">
-                {script && !railOpen && (
+                {script && mode === 'video' && !railOpen && (
                     <div className="flex justify-end">
                         <Button
                             type="button"
@@ -514,25 +503,43 @@ export default function DialoguePage() {
                         {error}
                     </div>
                 )}
+                {mode === 'video' && !currentSentence && (
+                    <div className="flex flex-wrap items-center gap-3 rounded-2xl border border-border/60 bg-card px-4 py-3 text-xs text-muted-foreground shadow-xs">
+                        <MessagesSquare className="h-4 w-4" />
+                        <span className="min-w-0 flex-1">{t('dialogue.noSentenceGuide')}</span>
+                        <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            className="h-8 rounded-lg px-3 text-xs"
+                            onClick={() => navigate(videoId ? `/player/${videoId}?sideBarAnimation=false` : '/home')}
+                        >
+                            <ArrowLeft className="mr-1 h-3.5 w-3.5" />
+                            {t('dialogue.goPlayer')}
+                        </Button>
+                    </div>
+                )}
                 <SceneSetupCard
-                    anchorText={currentSentence.text}
+                    mode={mode}
+                    topic={topic}
+                    anchorText={currentSentence?.text ?? ''}
                     script={script}
                     roleAName={roleAName}
                     roleBName={roleBName}
-                    learnerRole={learnerRole}
                     availability={availability}
                     difficulty={difficulty}
                     backend={backend}
                     creating={creating}
+                    onModeChange={setMode}
+                    onTopicChange={setTopic}
                     onRoleANameChange={setRoleAName}
                     onRoleBNameChange={setRoleBName}
-                    onLearnerRoleChange={setLearnerRole}
                     onDifficultyChange={setDifficulty}
                     onBackendChange={setBackend}
                     onCreate={() => void handleCreate()}
                 />
                 </div>
-                {script && railOpen && (
+                {script && mode === 'video' && railOpen && (
                     <div className="min-h-0 lg:sticky lg:top-0 lg:h-[calc(100vh-150px)]">
                         <ClipTranscriptRail
                             script={script}

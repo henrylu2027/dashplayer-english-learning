@@ -517,9 +517,21 @@
         "difficultyTitle": "Difficulty",
         "difficulty": {
             "basic": "Starter",
-            "intermediate": "Intermediate",
-            "challenge": "Challenge"
+            "intermediate": "Elementary",
+            "challenge": "Intermediate",
+            "advanced": "Advanced"
         },
+        "modeTitle": "Scene source",
+        "sceneMode": {
+            "video": "From the current video",
+            "custom": "AI-written scenario"
+        },
+        "topicTitle": "Topic",
+        "topicPlaceholder": "e.g. looking for a lost bag at the airport",
+        "topicHint": "The AI builds a short American-style story around this topic",
+        "noSentenceShort": "No sentence selected",
+        "bubbleClean": "No wrong words — see the tips on the right",
+        "bubbleSuggestions": "{{count}} suggestions — see the panel",
         "backend": "Model",
         "backendLocal": "Local model",
         "backendLocalHint": "Runs offline; shorter, simpler replies",
@@ -559,7 +571,7 @@
         "evaluationTitle": "AI feedback",
         "evalEmpty": "Feedback appears here after you say something",
         "evalProblems": "Corrections & tips",
-        "evalProblemsEmpty": "Nothing to fix in this one",
+        "evalProblemsEmpty": "No wrong words — the tips below are for sounding more natural",
         "evalCommentHint": "Turn comments show up here without interrupting the chat",
         "evalVocab": "Words this turn",
         "evalVocabEmpty": "No new words this turn",
@@ -570,8 +582,8 @@
         "kindPronunciation": "Pronunciation",
         "kindLinking": "Linking",
         "hintLabel": "Stuck?",
-        "bubbleAi": "AI · {{name}}",
-        "bubbleUser": "You · {{name}}",
+        "bubbleAi": "B · {{name}}",
+        "bubbleUser": "A · {{name}}",
         "turnsLoading": "Loading the conversation…",
         "turnFailed": "This turn failed, please retry",
         "scoreTitle": "AI pronunciation result",

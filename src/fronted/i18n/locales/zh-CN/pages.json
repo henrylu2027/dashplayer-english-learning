@@ -517,9 +517,21 @@
         "difficultyTitle": "难度",
         "difficulty": {
             "basic": "入门",
-            "intermediate": "进阶",
-            "challenge": "挑战"
+            "intermediate": "初级",
+            "challenge": "中级",
+            "advanced": "高级"
         },
+        "modeTitle": "场景来源",
+        "sceneMode": {
+            "video": "取自当前视频剧情",
+            "custom": "AI 生成全新场景"
+        },
+        "topicTitle": "主题关键词",
+        "topicPlaceholder": "例如：在机场找丢失的行李",
+        "topicHint": "AI 会围绕这个主题编一套生活化的美式小剧情",
+        "noSentenceShort": "还没有选中台词",
+        "bubbleClean": "这句没有错词，右侧有美式口语建议",
+        "bubbleSuggestions": "{{count}} 条优化建议，见右侧评测",
         "backend": "模型",
         "backendLocal": "本地模型",
         "backendLocalHint": "离线运行，回复更短更简单",
@@ -559,7 +571,7 @@
         "evaluationTitle": "AI 评测结果",
         "evalEmpty": "说一句之后，这里显示评测与建议",
         "evalProblems": "纠错与建议",
-        "evalProblemsEmpty": "这句没有需要改的地方",
+        "evalProblemsEmpty": "没有错词，下面给的是美式口语优化建议",
         "evalCommentHint": "每轮点评会显示在这里，不打断对话",
         "evalVocab": "本轮生词",
         "evalVocabEmpty": "本轮没有提取到生词",
@@ -570,8 +582,8 @@
         "kindPronunciation": "发音",
         "kindLinking": "连读",
         "hintLabel": "卡壳提示",
-        "bubbleAi": "AI · {{name}}",
-        "bubbleUser": "你 · {{name}}",
+        "bubbleAi": "B · {{name}}",
+        "bubbleUser": "A · {{name}}",
         "turnsLoading": "正在加载对话…",
         "turnFailed": "这一轮没有回复成功，请重试",
         "scoreTitle": "AI 美式发音评测结果",

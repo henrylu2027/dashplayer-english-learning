@@ -110,6 +110,7 @@ function mapSession(row: DialogueSessionRow, turnCount: number): DialogueSession
         chatSessionId: row.chat_session_id,
         title: row.title,
         anchorText: row.anchor_text,
+        mode: row.mode === 'custom' ? 'custom' : 'video',
         difficulty: parseDifficulty(row.difficulty),
         backend: parseBackend(row.backend),
         turnCount,
@@ -137,7 +138,12 @@ function parseEvaluation(json: string | null): DialogueTurnEvaluation | null {
     if (!json) {
         return null;
     }
-    return dialogueTurnEvaluationSchema.parse(JSON.parse(json));
+    try {
+        return dialogueTurnEvaluationSchema.parse(JSON.parse(json));
+    } catch {
+        // 旧版本存下来的评测结构不同，读不出来就当作没有评测，不能让历史页打不开
+        return null;
+    }
 }
 
 /**
@@ -152,7 +158,6 @@ function mapTurn(row: DialogueTurnRow): DialogueTurnVO {
         cardId: row.card_id,
         correction: parseCorrection(row.correction_json),
         evaluation: parseEvaluation(row.evaluation_json),
-        replyZh: row.reply_zh,
         createdAt: row.created_at,
     };
 }
@@ -182,6 +187,7 @@ export default class DialogueRepositoryImpl implements DialogueRepository {
                 learner_role: params.script?.learnerRole ?? null,
                 script_json: params.script ? JSON.stringify(params.script) : null,
                 difficulty: params.difficulty,
+                mode: params.mode,
                 backend: params.backend,
                 status: 'active',
                 review_json: null,
@@ -255,7 +261,6 @@ export default class DialogueRepositoryImpl implements DialogueRepository {
                 content: params.content,
                 card_id: params.cardId ?? null,
                 evaluation_json: params.evaluation ? JSON.stringify(params.evaluation) : null,
-                reply_zh: params.replyZh ?? null,
                 created_at: Date.now(),
             })
             .run();

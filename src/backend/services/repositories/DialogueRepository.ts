@@ -25,6 +25,8 @@ export interface CreateDialogueSessionParams {
     scene: DialogueScene;
     /** 本次使用的剧本；未按剧本生成时为 null。 */
     script: DialogueScript | null;
+    /** 场景生成模式。 */
+    mode: 'video' | 'custom';
     /** 难度。 */
     difficulty: DialogueDifficulty;
     /** 模型后端。 */
@@ -45,8 +47,6 @@ export interface AppendDialogueTurnParams {
     cardId?: number | null;
     /** 逐轮评测；只有学习者发言且由对话模型给出。 */
     evaluation?: DialogueTurnEvaluation | null;
-    /** 助手台词的中文意思；学习者回合不传。 */
-    replyZh?: string | null;
 }
 
 /**

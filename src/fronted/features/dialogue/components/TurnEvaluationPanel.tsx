@@ -5,20 +5,11 @@ import type { DialogueTurnEvaluation, DialogueTurnProblem } from '@/common/contr
 import { Button } from '@/fronted/components/ui/button';
 import { cn } from '@/fronted/lib/utils';
 
-/** 纠错类型的徽标配色。 */
-const KIND_CLASS: Record<DialogueTurnProblem['kind'], string> = {
-    grammar: 'bg-red-500/10 text-red-600 dark:text-red-400',
-    wording: 'bg-amber-500/10 text-amber-600 dark:text-amber-400',
-    pronunciation: 'bg-sky-500/10 text-sky-600 dark:text-sky-400',
-    linking: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400',
-};
-
-/** 纠错类型的文案 key。 */
-const KIND_LABEL: Record<DialogueTurnProblem['kind'], string> = {
-    grammar: 'dialogue.kindGrammar',
-    wording: 'dialogue.kindWording',
-    pronunciation: 'dialogue.kindPronunciation',
-    linking: 'dialogue.kindLinking',
+/** 错词类型的徽标配色。 */
+const TYPE_CLASS: Record<DialogueTurnProblem['type'], string> = {
+    错词: 'bg-red-500/10 text-red-600 dark:text-red-400',
+    漏词: 'bg-amber-500/10 text-amber-600 dark:text-amber-400',
+    冗余: 'bg-sky-500/10 text-sky-600 dark:text-sky-400',
 };
 
 /**
@@ -41,18 +32,20 @@ function scoreTone(score: number | null): string {
 /**
  * 场景对话右侧的评测面板：综合、发音、语法、错词 + 纠错与建议 + 点评。
  *
- * 说明：面板只展示 AI 评测，不发散到气泡里；没有评测时按同一版式显示占位，
- * 对话推进时版面不跳动。
+ * 说明：发音分来自独立发音评测模块（pronunciation 参数），
+ * 其余分数与建议来自对话模型，面板内容只在前端展示，不回传给模型。
  *
- * @param props.evaluation 最近一轮学习者的评测结果。
+ * @param props.evaluation 最近一轮学习者的评测。
+ * @param props.pronunciation 独立模块给出的发音分；没有录音时为 null。
  * @param props.pending 正在生成回复与评测。
  * @param props.savingWords 正在把生词写进词汇工坊。
- * @param props.onAddWords 手动把本轮生词再存一次。
+ * @param props.onAddWords 把本轮生词再存一次。
  * @param props.onRetry 重说一次。
  * @param props.onContinue 继续对话。
  */
 export default function TurnEvaluationPanel({
     evaluation,
+    pronunciation,
     pending,
     savingWords,
     onAddWords,
@@ -60,6 +53,7 @@ export default function TurnEvaluationPanel({
     onContinue,
 }: {
     evaluation: DialogueTurnEvaluation | null;
+    pronunciation: number | null;
     pending: boolean;
     savingWords: boolean;
     onAddWords: () => void;
@@ -68,15 +62,11 @@ export default function TurnEvaluationPanel({
 }) {
     const { t } = useTranslation('pages');
 
-    const problemCount = evaluation?.problems.filter((item) => item.kind !== 'linking').length ?? 0;
     const tiles = [
         { label: t('dialogue.scoreOverall'), value: evaluation?.overall ?? null },
-        { label: t('dialogue.scorePronunciation'), value: evaluation?.pronunciation ?? null },
+        { label: t('dialogue.scorePronunciation'), value: pronunciation },
         { label: t('dialogue.scoreGrammar'), value: evaluation?.grammar ?? null },
-        {
-            label: t('dialogue.scoreWords'),
-            value: evaluation ? 100 - Math.min(100, problemCount * 10) : null,
-        },
+        { label: t('dialogue.scoreWords'), value: evaluation?.wrongWordsScore ?? null },
     ];
 
     return (
@@ -99,17 +89,15 @@ export default function TurnEvaluationPanel({
 
             <div className="rounded-xl bg-muted/40 px-3 py-2">
                 <div className="text-[11px] text-muted-foreground">{t('dialogue.evalProblems')}</div>
-                {evaluation && evaluation.problems.length > 0 ? (
-                    <ul className="mt-1.5 flex flex-col gap-2">
-                        {evaluation.problems.map((item) => (
-                            <li key={`${item.kind}-${item.original}`} className="text-xs leading-5">
-                                <span className={cn('mr-1.5 rounded px-1.5 py-0.5 text-[10px]', KIND_CLASS[item.kind])}>
-                                    {t(KIND_LABEL[item.kind])}
+                {evaluation && evaluation.errorList.length > 0 ? (
+                    <ul className="mt-1.5 flex flex-col gap-1.5">
+                        {evaluation.errorList.map((item) => (
+                            <li key={`${item.type}-${item.word}`} className="text-xs leading-5">
+                                <span className={cn('mr-1.5 rounded px-1.5 py-0.5 text-[10px]', TYPE_CLASS[item.type])}>
+                                    {item.type}
                                 </span>
-                                <span className="text-muted-foreground line-through">{item.original}</span>
-                                <span className="mx-1 text-muted-foreground">→</span>
-                                <span className="text-foreground">{item.better}</span>
-                                <div className="mt-0.5 text-muted-foreground">{item.whyZh}</div>
+                                <span className="font-medium text-foreground">{item.word}</span>
+                                <span className="ml-1 text-muted-foreground">{item.desc}</span>
                             </li>
                         ))}
                     </ul>

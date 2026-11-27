@@ -49,14 +49,13 @@ import {
     type DialogueReplyTurnRequest,
     type DialogueReplyTurnResult,
     type DialogueTurnEvaluation,
-    type DialogueTurnHint,
     type DialogueTurnReplyDraft,
 } from '@/common/contracts/dialogue';
 import { normalizeShadowingSource } from '@/backend/services/shadowing/ShadowingSource';
 import { normalizeWord, tokenizeForScoring } from '@/common/utils/wordTokens';
 import {
     buildCorrectionPrompt,
-    buildDialogueSystemPrompt,
+    buildCustomScenePrompt,
     buildDialogueTurnPrompt,
     buildDialogueTurnSystemPrompt,
     buildReviewPrompt,
@@ -141,6 +140,9 @@ const MAX_LIST_LIMIT = 50;
 
 /** 锚点台词最大词数；过长会导致场景失焦。 */
 const MAX_ANCHOR_WORDS = 120;
+
+/** 自编场景的主题关键词最大字数。 */
+const MAX_TOPIC_CHARS = 60;
 
 /** 单条消息最大字符数，兜住异常粘贴。 */
 const MAX_TURN_CHARS = 4000;
@@ -377,13 +379,27 @@ export class DialogueServiceImpl implements DialogueService {
     }
 
     public async create(request: DialogueCreateRequest): Promise<DialogueCreateResult> {
-        const anchorText = request.anchorText.trim();
-        const anchorWordCount = tokenizeForScoring(anchorText).length;
-        if (anchorWordCount === 0) {
-            throw new Error('请先播放到一句有字幕的视频台词');
+        const mode = request.mode === 'custom' ? 'custom' : 'video';
+        // 自编模式用主题当锚点；跟视频模式必须绑定视频句
+        const topic = (request.topic ?? '').trim();
+        if (mode === 'custom') {
+            if (topic.length < 2) {
+                throw new Error('写一个主题再生成场景');
+            }
+            if (topic.length > MAX_TOPIC_CHARS) {
+                throw new Error(`主题太长，请控制在 ${MAX_TOPIC_CHARS} 字以内`);
+            }
         }
-        if (anchorWordCount > MAX_ANCHOR_WORDS) {
-            throw new Error(`当前句过长（${anchorWordCount} 词），请选择更短的一句`);
+        const anchorText = (mode === 'custom' ? topic : request.anchorText.trim());
+        // 视频模式才按英文词数校验；自编主题是中文，按字数在前一步校验
+        if (mode === 'video') {
+            const anchorWordCount = tokenizeForScoring(anchorText).length;
+            if (anchorWordCount === 0) {
+                throw new Error('请先播放到一句有字幕的视频台词');
+            }
+            if (anchorWordCount > MAX_ANCHOR_WORDS) {
+                throw new Error(`当前句过长（${anchorWordCount} 词），请选择更短的一句`);
+            }
         }
         if (!DIALOGUE_DIFFICULTIES.includes(request.difficulty)) {
             throw new Error(`未知的场景难度：${String(request.difficulty)}`);
@@ -392,7 +408,7 @@ export class DialogueServiceImpl implements DialogueService {
             throw new Error(`未知的模型后端：${String(request.backend)}`);
         }
         const source = normalizeShadowingSource(request.source);
-        if (source.kind !== 'video' || !source.videoKey || source.sentenceIndex === undefined) {
+        if (mode === 'video' && (source.kind !== 'video' || !source.videoKey || source.sentenceIndex === undefined)) {
             throw new Error('场景对话必须绑定视频句，请在播放器中播放到目标台词');
         }
         const paragraphLines = request.paragraphLines
@@ -400,9 +416,9 @@ export class DialogueServiceImpl implements DialogueService {
             .filter((line) => line.length > 0)
             .slice(0, MAX_CONTEXT_LINES);
         // 学习者练过的台词：至少两句才参与取材，否则退回按当前句生成
-        const focusLines = normalizeFocusLines(request.focusLines);
+        const focusLines = mode === 'video' ? normalizeFocusLines(request.focusLines) : [];
         // 剧本：有值时场景围绕这段真实对话展开，目标表达也锁定在剧本内
-        const script = normalizeScript(request.script, source.videoKey ?? '');
+        const script = mode === 'video' ? normalizeScript(request.script, source.videoKey ?? '') : null;
 
         if (request.backend === 'local') {
             this.localAiService.beginDialogueSession();
@@ -410,6 +426,8 @@ export class DialogueServiceImpl implements DialogueService {
         let chatSessionId: string | null = null;
         try {
             const generatedScene = await this.generateScene({
+                mode,
+                topic,
                 anchorText,
                 paragraphLines,
                 focusLines,
@@ -420,13 +438,17 @@ export class DialogueServiceImpl implements DialogueService {
             // 有剧本时目标表达已经限定在剧本内，不再用练习记录覆盖；
             // 没有剧本时才走「练过的句子优先」，避免模型改写后复盘核对不上
             const scene = script ? generatedScene : applyFocusTargets(generatedScene, focusLines);
-            const systemPrompt = buildDialogueSystemPrompt({ scene, difficulty: request.difficulty });
+            const systemPrompt = buildDialogueTurnSystemPrompt({
+                scene,
+                difficulty: request.difficulty,
+                mode,
+            });
             chatSessionId = this.chatSessionService.create({
-                videoId: source.videoKey,
+                videoId: source.videoKey ?? '',
                 originalTopic: anchorText,
                 paragraphLines,
-                subtitleFileHash: source.videoKey,
-                anchorSentenceIndex: source.sentenceIndex,
+                subtitleFileHash: source.videoKey ?? '',
+                anchorSentenceIndex: source.sentenceIndex ?? 0,
                 mode: 'scenario-dialogue',
                 backend: request.backend,
                 systemPrompt,
@@ -437,6 +459,7 @@ export class DialogueServiceImpl implements DialogueService {
                 anchorText,
                 scene,
                 script,
+                mode,
                 difficulty: request.difficulty,
                 backend: request.backend,
             });
@@ -563,12 +586,8 @@ export class DialogueServiceImpl implements DialogueService {
             throw new Error('对话已结束，不能再继续');
         }
         const turns = await this.dialogueRepository.listTurns(request.sessionId);
-        // undefined 表示打字输入；数组（可能为空）表示来自录音，发音分只在录音时才有
+        // undefined 表示打字输入；数组（可能为空）表示来自录音
         const hasAudio = Array.isArray(request.lowConfidenceWords);
-        const lowConfidenceWords = (request.lowConfidenceWords ?? [])
-            .map((word) => word.trim())
-            .filter((word) => word.length > 0)
-            .slice(0, MAX_LOW_CONFIDENCE_WORDS);
         // 难度可以在对话中途调整：界面传了就用界面的，否则沿用创建时的设置
         const difficulty = request.difficulty && DIALOGUE_DIFFICULTIES.includes(request.difficulty)
             ? request.difficulty
@@ -576,18 +595,16 @@ export class DialogueServiceImpl implements DialogueService {
         const systemPrompt = buildDialogueTurnSystemPrompt({
             scene: record.scene,
             difficulty,
+            mode: record.session.mode,
         });
         const draft = await this.generateTurnReply({
             systemPrompt,
             history: turns,
             userText: text,
-            hasAudio,
-            lowConfidenceWords,
             backend: record.session.backend,
         });
-        const replyEn = this.sanitizeReply(draft.replyEn);
-        const evaluation = this.sanitizeEvaluation(draft.evaluation, text, hasAudio, lowConfidenceWords);
-        const hint = this.sanitizeHint(draft.hint);
+        const reply = this.sanitizeReply(draft.ai_reply);
+        const evaluation = this.sanitizeEvaluation(draft, text);
         const userTurn = await this.dialogueRepository.appendTurn({
             sessionId: request.sessionId,
             role: 'user',
@@ -597,19 +614,18 @@ export class DialogueServiceImpl implements DialogueService {
         const assistantTurn = await this.dialogueRepository.appendTurn({
             sessionId: request.sessionId,
             role: 'assistant',
-            content: replyEn,
-            replyZh: draft.replyZh.trim() || null,
+            content: reply,
         });
         this.logger.info('dialogue turn replied', {
             sessionId: request.sessionId,
             backend: record.session.backend,
+            mode: record.session.mode,
             hasAudio,
-            problemCount: evaluation.problems.length,
+            errorCount: evaluation.errorList.length,
             vocabCount: evaluation.vocab.length,
-            hasHint: hint !== null,
-            replyWords: tokenizeForScoring(replyEn).length,
+            replyWords: tokenizeForScoring(reply).length,
         });
-        return { userTurn, assistantTurn, hint };
+        return { userTurn, assistantTurn };
     }
 
     public async finish(request: DialogueFinishRequest): Promise<DialogueFinishResult> {
@@ -690,6 +706,10 @@ export class DialogueServiceImpl implements DialogueService {
      * @returns 通过 schema 校验的场景卡。
      */
     private async generateScene(params: {
+        /** 场景生成模式。 */
+        mode: 'video' | 'custom';
+        /** 自编模式的主题关键词。 */
+        topic: string;
         anchorText: string;
         paragraphLines: string[];
         /** 学习者练过的台词；有值时场景必须复用这些原句。 */
@@ -699,13 +719,15 @@ export class DialogueServiceImpl implements DialogueService {
         difficulty: DialogueCreateRequest['difficulty'];
         backend: DialogueModelBackend;
     }): Promise<DialogueScene> {
-        const prompt = params.script
-            ? buildScriptScenePrompt({
-                anchorText: params.anchorText,
-                script: params.script,
-                difficulty: params.difficulty,
-            })
-            : buildScenePrompt(params);
+        const prompt = params.mode === 'custom'
+            ? buildCustomScenePrompt({ topic: params.topic, difficulty: params.difficulty })
+            : params.script
+                ? buildScriptScenePrompt({
+                    anchorText: params.anchorText,
+                    script: params.script,
+                    difficulty: params.difficulty,
+                })
+                : buildScenePrompt(params);
         if (params.backend === 'local') {
             const modelId = await this.localAiService.getActiveModelId();
             const raw = await this.localAiService.generate(
@@ -775,8 +797,6 @@ export class DialogueServiceImpl implements DialogueService {
         systemPrompt: string;
         history: DialogueTurnVO[];
         userText: string;
-        hasAudio: boolean;
-        lowConfidenceWords: string[];
         backend: DialogueModelBackend;
     }): Promise<DialogueTurnReplyDraft> {
         if (params.backend === 'local') {
@@ -785,8 +805,6 @@ export class DialogueServiceImpl implements DialogueService {
                 systemPrompt: params.systemPrompt,
                 history: params.history,
                 userText: params.userText,
-                hasAudio: params.hasAudio,
-                lowConfidenceWords: params.lowConfidenceWords,
             });
             const raw = await this.localAiService.generate(
                 prompt,
@@ -806,7 +824,7 @@ export class DialogueServiceImpl implements DialogueService {
                 role: turn.role,
                 content: turn.content,
             } as ModelMessage)),
-            { role: 'user', content: this.buildTurnUserMessage(params) },
+            { role: 'user', content: params.userText },
         ];
         const result = await generateObject({
             model,
@@ -817,24 +835,6 @@ export class DialogueServiceImpl implements DialogueService {
             topP: DIALOGUE_TOP_P,
         });
         return result.object;
-    }
-
-    /**
-     * 把本轮输入与录音线索拼成用户消息。
-     * @param params 本轮输入与是否来自录音。
-     * @returns 发给模型的用户消息。
-     */
-    private buildTurnUserMessage(params: {
-        userText: string;
-        hasAudio: boolean;
-        lowConfidenceWords: string[];
-    }): string {
-        const note = params.hasAudio
-            ? (params.lowConfidenceWords.length > 0
-                ? `（这条来自录音，识别没把握的词：${params.lowConfidenceWords.join('、')}）`
-                : '（这条来自录音，识别没有明显没把握的词）')
-            : '（这条是打字输入，pronunciation 必须为 null，也不能给 pronunciation 类问题）';
-        return `${params.userText}\n\n${note}`;
     }
 
     /**
@@ -871,43 +871,28 @@ export class DialogueServiceImpl implements DialogueService {
     }
 
     /**
-     * 清洗评测：丢弃引用不到学习者原句的意见、无录音依据的发音意见，并统一分数区间。
+     * 清洗评测：错词去重、生词过滤，分数统一到 0~100。
      *
-     * @param draft 模型返回的评测。
+     * 注意：模型自评的 pronunciation 一律丢弃——发音分由独立发音评测模块给出。
+     *
+     * @param draft 模型返回的整份草稿。
      * @param userText 学习者原句。
-     * @param hasAudio 本轮是否来自录音。
-     * @param lowConfidenceWords 识别没把握的词。
      * @returns 可展示、可入库的评测。
      */
     private sanitizeEvaluation(
-        draft: DialogueTurnEvaluation,
+        draft: DialogueTurnReplyDraft,
         userText: string,
-        hasAudio: boolean,
-        lowConfidenceWords: string[],
     ): DialogueTurnEvaluation {
         const sentence = normalizePhrase(userText);
-        const lowSet = new Set(lowConfidenceWords.map((word) => normalizePhrase(word)).filter((word) => word.length > 0));
         const seen = new Set<string>();
-        const problems = draft.problems.filter((item) => {
-            const original = normalizePhrase(item.original);
-            const better = normalizePhrase(item.better);
-            if (original.length === 0 || original === better) {
+        const errorList = draft.error_list.filter((item) => {
+            const word = normalizePhrase(item.word);
+            // 漏词不可能出现在原句里；错词与冗余必须能在学习者原句里找到
+            if (item.type !== '漏词' && (word.length === 0 || !sentence.includes(word))) {
                 return false;
             }
-            if (item.kind === 'pronunciation') {
-                // 发音类只能落在识别没把握的词上；打字输入一律不判发音
-                if (!hasAudio || lowSet.size === 0) {
-                    return false;
-                }
-                const hit = [...lowSet].some((word) => original.includes(word) || word.includes(original));
-                if (!hit) {
-                    return false;
-                }
-            } else if (!sentence.includes(original)) {
-                return false;
-            }
-            const key = `${item.kind}:${original}`;
-            if (seen.has(key)) {
+            const key = `${item.type}:${word}`;
+            if (word.length === 0 || seen.has(key)) {
                 return false;
             }
             seen.add(key);
@@ -915,7 +900,7 @@ export class DialogueServiceImpl implements DialogueService {
         }).slice(0, MAX_CORRECTION_ITEMS);
 
         const vocab: string[] = [];
-        for (const word of draft.vocab) {
+        for (const word of draft.new_words) {
             const trimmed = word.trim();
             if (vocab.length >= MAX_TURN_VOCAB) {
                 break;
@@ -930,33 +915,15 @@ export class DialogueServiceImpl implements DialogueService {
             vocab.push(trimmed);
         }
 
-        const clampScore = (value: number | null): number | null => (value === null
-            ? null
-            : Math.max(0, Math.min(100, Math.round(value))));
+        const clamp = (value: number): number => Math.max(0, Math.min(100, Math.round(value)));
         return {
-            overall: Math.max(0, Math.min(100, Math.round(draft.overall))),
-            grammar: clampScore(draft.grammar),
-            pronunciation: hasAudio ? clampScore(draft.pronunciation) : null,
-            commentZh: draft.commentZh.trim(),
-            problems,
+            overall: clamp(draft.overall),
+            grammar: clamp(draft.grammar),
+            wrongWordsScore: clamp(draft.wrongWordsScore),
+            commentZh: draft.comment.trim(),
+            errorList,
             vocab,
         };
-    }
-
-    /**
-     * 清洗卡壳提示：英文为空时整条丢弃。
-     * @param hint 模型返回的提示。
-     * @returns 可展示的提示或 null。
-     */
-    private sanitizeHint(hint: DialogueTurnHint | null): DialogueTurnHint | null {
-        if (!hint) {
-            return null;
-        }
-        const en = hint.en.trim();
-        if (en.length === 0) {
-            return null;
-        }
-        return { en, zh: hint.zh.trim() };
     }
 
     /**

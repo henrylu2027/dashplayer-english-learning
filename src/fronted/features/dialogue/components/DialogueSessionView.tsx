@@ -9,11 +9,11 @@ import type {
     DialogueScene,
     DialogueSessionSummary,
     DialogueTurnEvaluation,
-    DialogueTurnHint,
     DialogueTurnVO,
 } from '@/common/contracts/dialogue';
 import { DIALOGUE_DIFFICULTIES } from '@/common/contracts/dialogue';
 import { Button } from '@/fronted/components/ui/button';
+import { practiceApi } from '@/fronted/features/practice/practiceApi';
 import { srsApi } from '@/fronted/features/srs/srsApi';
 import { videoLearningApi } from '@/fronted/features/video-learning/videoLearningApi';
 import { getTtsUrl, playAudioUrlAndWait } from '@/fronted/infrastructure/audio/AudioPlayer';
@@ -65,8 +65,8 @@ export default function DialogueSessionView({
     const [loading, setLoading] = useState(true);
     /** 最近一轮学习者的评测，显示在右栏。 */
     const [evaluation, setEvaluation] = useState<DialogueTurnEvaluation | null>(null);
-    /** 学习者卡壳时给出的参考句式，显示在参考句式区。 */
-    const [hint, setHint] = useState<DialogueTurnHint | null>(null);
+    /** 独立发音模块给出的最近一次发音分；没有录音时为 null。 */
+    const [pronunciation, setPronunciation] = useState<number | null>(null);
     /** 本轮所有学习者评测，用于批量提取生词。 */
     const [evaluations, setEvaluations] = useState<DialogueTurnEvaluation[]>([]);
     const [sending, setSending] = useState(false);
@@ -132,7 +132,6 @@ export default function DialogueSessionView({
                     cardId: null,
                     correction: null,
                     evaluation: null,
-                    replyZh: scene.openingHintZh,
                     createdAt: Date.now(),
                 }]);
             })
@@ -193,13 +192,27 @@ export default function DialogueSessionView({
         setSending(true);
         // 说话人 A（学习者）先出声；AI 的台词排在队列后面，等这句读完才开口
         void speak(text);
+        // 发音分由独立发音评测模块给出；没有录音就留空
+        setPronunciation(null);
+        if (meta?.audio && meta.audio.byteLength > 0) {
+            void practiceApi.retell({
+                referenceText: text,
+                source: { kind: 'free' },
+                audio: meta.audio,
+                mimeType: meta.mimeType ?? 'audio/webm',
+            }).then((result) => {
+                if (mountedRef.current) {
+                    setPronunciation(result.pronunciationScore ?? null);
+                }
+            }).catch((error) => {
+                logger.warn('发音评测失败', { error });
+            });
+        }
         try {
             const result = await dialogueApi.replyTurn({
                 sessionId: session.id,
                 text,
                 difficulty,
-                // 只有录音输入才带这一项；打字输入必须留空，模型据此不给发音分
-                ...(meta ? { lowConfidenceWords: meta.lowConfidenceWords } : {}),
             });
             if (!mountedRef.current) {
                 return;
@@ -207,15 +220,13 @@ export default function DialogueSessionView({
             setTurns((previous) => [...previous, result.userTurn, result.assistantTurn]);
             const turnEvaluation = result.userTurn.evaluation;
             setEvaluation(turnEvaluation);
-            setHint(result.hint);
             if (turnEvaluation) {
                 setEvaluations((previous) => [...previous, turnEvaluation]);
                 // 生词统一入库：模型提取的生词 + 单词级的错词，右侧面板展示的同时写进词汇工坊
                 const autoWords = [
                     ...turnEvaluation.vocab,
-                    ...turnEvaluation.problems
-                        .filter((problem) => problem.kind === 'grammar' || problem.kind === 'wording')
-                        .map((problem) => problem.original.trim())
+                    ...turnEvaluation.errorList
+                        .map((item) => item.word.trim())
                         .filter((word) => /^[A-Za-z][A-Za-z'-]*$/.test(word)),
                 ];
                 const added = await saveVocab(autoWords);
@@ -277,12 +288,11 @@ export default function DialogueSessionView({
                     words.add(word.trim());
                 }
             }
-            for (const problem of turn.problems) {
+            for (const item of turn.errorList) {
                 // 只把单词级的错误吸收进生词本；整句片段进 SRS 没有复习价值
-                const original = problem.original.trim();
-                if ((problem.kind === 'grammar' || problem.kind === 'wording')
-                    && /^[A-Za-z][A-Za-z'-]*$/.test(original)) {
-                    words.add(original);
+                const word = item.word.trim();
+                if (/^[A-Za-z][A-Za-z'-]*$/.test(word)) {
+                    words.add(word);
                 }
             }
         }
@@ -318,11 +328,10 @@ export default function DialogueSessionView({
             cardId: null,
             correction: null,
             evaluation: null,
-            replyZh: scene.openingHintZh,
             createdAt: Date.now(),
         }]);
         setEvaluation(null);
-        setHint(null);
+        setPronunciation(null);
         setEvaluations([]);
         savedWordsRef.current.clear();
     };
@@ -383,7 +392,6 @@ export default function DialogueSessionView({
                     <SceneCardView
                         scene={scene}
                         onSpeak={speak}
-                        hint={hint}
                         actions={(
                             <>
                                 <Button
@@ -456,6 +464,13 @@ export default function DialogueSessionView({
                                     >
                                         {turn.content}
                                     </div>
+                                    {turn.role === 'user' && turn.evaluation && (
+                                        <div className="mt-1 text-right text-[11px] text-muted-foreground">
+                                            {turn.evaluation.errorList.length === 0
+                                                ? t('dialogue.bubbleClean')
+                                                : t('dialogue.bubbleSuggestions', { count: turn.evaluation.errorList.length })}
+                                        </div>
+                                    )}
                                 </div>
                                 {turn.role === 'user' && (
                                     <button
@@ -519,6 +534,7 @@ export default function DialogueSessionView({
                 {/* 右：AI 评测 */}
                 <TurnEvaluationPanel
                     evaluation={evaluation}
+                    pronunciation={pronunciation}
                     pending={sending}
                     savingWords={savingWords}
                     onAddWords={() => void handleAddWords()}
@@ -526,7 +542,7 @@ export default function DialogueSessionView({
                         toast.success(t('dialogue.retryHint'));
                     }}
                     onContinue={() => {
-                        setHint(null);
+                        setPronunciation(null);
                     }}
                 />
             </div>

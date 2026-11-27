@@ -27,6 +27,8 @@ export const dialogueSession = sqliteTable('dp_dialogue_session', {
     /** 完整剧本 JSON（台词行 + 角色名 + 扮演方）。 */
     script_json: text('script_json'),
     difficulty: text('difficulty').notNull(),
+    /** 场景生成模式：video（跟随视频剧情）/ custom（自编主题）。 */
+    mode: text('mode').notNull().default('video'),
     backend: text('backend').notNull(),
     status: text('status').notNull(),
     review_json: text('review_json'),

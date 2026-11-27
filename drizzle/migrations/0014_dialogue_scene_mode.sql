@@ -1,0 +1,1 @@
+ALTER TABLE `dp_dialogue_session` ADD `mode` text DEFAULT 'video' NOT NULL;

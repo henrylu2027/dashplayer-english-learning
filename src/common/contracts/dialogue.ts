@@ -11,7 +11,13 @@ import type { ShadowingAttemptSource } from '@/common/contracts/shadowing';
  */
 
 /** 场景难度；只控制语言复杂度，不预设学习者年龄。 */
-export const DIALOGUE_DIFFICULTIES = ['basic', 'intermediate', 'challenge'] as const;
+export const DIALOGUE_DIFFICULTIES = ['basic', 'intermediate', 'challenge', 'advanced'] as const;
+
+/** 场景生成模式：跟着视频剧情，或按主题自编。 */
+export const DIALOGUE_SCENE_MODES = ['video', 'custom'] as const;
+
+/** 场景生成模式类型。 */
+export type DialogueSceneMode = (typeof DIALOGUE_SCENE_MODES)[number];
 
 /** 场景难度类型。 */
 export type DialogueDifficulty = (typeof DIALOGUE_DIFFICULTIES)[number];
@@ -148,8 +154,10 @@ export interface DialogueSessionSummary {
     chatSessionId: string;
     /** 场景英文短标题。 */
     title: string;
-    /** 锚定的视频台词。 */
+    /** 视频模式的锚点台词；自编场景为主题关键词。 */
     anchorText: string;
+    /** 场景生成模式。 */
+    mode: DialogueSceneMode;
     /** 难度。 */
     difficulty: DialogueDifficulty;
     /** 模型后端。 */
@@ -163,23 +171,21 @@ export interface DialogueSessionSummary {
 }
 
 /**
- * 逐轮评测里的一条纠错/建议。
+ * 逐轮评测里的一条错词记录。
  *
- * 与旧的逐句纠错相比多了 linking（连读/弱读）一类：
- * 连读建议只针对学习者已经说对的句子，属于锦上添花，不当作错误处理。
+ * 只有 错词/漏词/冗余 三类：连读、弱读、地道替换写进 comment，
+ * 发音分由独立发音评测模块给出，模型不参与。
  */
 export const dialogueTurnProblemSchema = z.object({
-    /** 问题类型。 */
-    kind: z.enum(['grammar', 'wording', 'pronunciation', 'linking']),
-    /** 学习者原句片段，必须照抄。 */
-    original: z.string().min(1),
-    /** 更自然或更正确的英文；连读类给出连起来读的写法。 */
-    better: z.string().min(1),
-    /** 一句中文说明。 */
-    whyZh: z.string().min(1),
+    /** 错误类型。 */
+    type: z.enum(['错词', '漏词', '冗余']),
+    /** 涉及的单词或短语，尽量照抄学习者原句。 */
+    word: z.string().min(1),
+    /** 简短中文说明。 */
+    desc: z.string().min(1),
 });
 
-/** 逐轮评测里的纠错类型。 */
+/** 逐轮评测里的错词类型。 */
 export type DialogueTurnProblem = z.infer<typeof dialogueTurnProblemSchema>;
 
 /**
@@ -190,14 +196,14 @@ export type DialogueTurnProblem = z.infer<typeof dialogueTurnProblemSchema>;
 export const dialogueTurnEvaluationSchema = z.object({
     /** 综合得分 0~100。 */
     overall: z.number().int().min(0).max(100),
-    /** 发音/流利度印象分 0~100；没有录音或无从判断时为 null。 */
-    pronunciation: z.number().int().max(100).nullable(),
-    /** 语法分 0~100；没有语法问题记满分，无从判断时为 null。 */
-    grammar: z.number().int().max(100).nullable(),
-    /** 一句中文点评，面向初学者。 */
-    commentZh: z.string().min(1),
-    /** 语法/用词/发音/连读建议。 */
-    problems: z.array(dialogueTurnProblemSchema).max(4),
+    /** 语法分 0~100。 */
+    grammar: z.number().int().min(0).max(100),
+    /** 错词分 0~100，按错词严重程度扣分。 */
+    wrongWordsScore: z.number().int().min(0).max(100),
+    /** 美式口语优化建议：连读、弱读、地道替换、语法点评。 */
+    commentZh: z.string(),
+    /** 错词/漏词/冗余。 */
+    errorList: z.array(dialogueTurnProblemSchema).max(4),
     /** 本轮生词/短语，供词汇工坊入库。 */
     vocab: z.array(z.string()).max(6),
 });
@@ -205,32 +211,30 @@ export const dialogueTurnEvaluationSchema = z.object({
 /** 逐轮评测结果类型。 */
 export type DialogueTurnEvaluation = z.infer<typeof dialogueTurnEvaluationSchema>;
 
-/** 卡壳提示：学习者不会说时给出的参考句式。 */
-export const dialogueTurnHintSchema = z.object({
-    /** 参考英文。 */
-    en: z.string().min(1),
-    /** 中文释义。 */
-    zh: z.string(),
-});
-
-/** 卡壳提示类型。 */
-export type DialogueTurnHint = z.infer<typeof dialogueTurnHintSchema>;
-
 /**
- * 对话模型一轮回复的结构化输出契约。
+ * 对话模型一轮回复的结构化输出契约（字段名与产品约定一致）。
  *
- * 说明：角色台词与评测纠错在同一个 JSON 里严格分开——
- * replyEn 是气泡里唯一的文字，其余字段全部只进右侧面板。
+ * 说明：ai_reply 是气泡里唯一的文字，其余字段全部只进右侧面板；
+ * pronunciation 保留在 JSON 里只是为了贴合约定，服务端一律丢弃——
+ * 发音分由独立发音评测模块给出，模型不得自评发音。
  */
 export const dialogueTurnReplySchema = z.object({
     /** 角色台词：一句美式短句。 */
-    replyEn: z.string().min(1),
-    /** 台词的中文意思；可以为空。 */
-    replyZh: z.string(),
-    /** 学习者卡壳时给出的参考句式；没有卡壳时为 null。 */
-    hint: dialogueTurnHintSchema.nullable(),
-    /** 对学习者上一句的评测。 */
-    evaluation: dialogueTurnEvaluationSchema,
+    ai_reply: z.string().min(1),
+    /** 综合分 0~100。 */
+    overall: z.number().int().min(0).max(100),
+    /** 模型自评的发音分：仅占位，服务端不使用。 */
+    pronunciation: z.number().int().min(0).max(100).nullable(),
+    /** 语法分 0~100。 */
+    grammar: z.number().int().min(0).max(100),
+    /** 错词分 0~100。 */
+    wrongWordsScore: z.number().int().min(0).max(100),
+    /** 错词/漏词/冗余清单。 */
+    error_list: z.array(dialogueTurnProblemSchema).max(4),
+    /** 美式口语优化建议。 */
+    comment: z.string(),
+    /** 本轮生词/短语。 */
+    new_words: z.array(z.string()).max(6),
 });
 
 /** 对话模型一轮回复的草稿类型。 */
@@ -252,8 +256,6 @@ export interface DialogueTurnVO {
     correction: DialogueCorrection | null;
     /** 该回合的逐轮评测；只有学习者发言且由对话模型给出时存在。 */
     evaluation: DialogueTurnEvaluation | null;
-    /** 助手台词的中文意思；学习者回合为 null。 */
-    replyZh: string | null;
     /** 记录时间，epoch 毫秒。 */
     createdAt: number;
 }
@@ -286,8 +288,6 @@ export interface DialogueReplyTurnResult {
     userTurn: DialogueTurnVO;
     /** AI 的角色台词。 */
     assistantTurn: DialogueTurnVO;
-    /** 卡壳提示；没有时为 null。 */
-    hint: DialogueTurnHint | null;
 }
 
 /**
@@ -470,7 +470,11 @@ export interface DialogueFocusLine {
  * 生成场景并创建对话的请求。
  */
 export interface DialogueCreateRequest {
-    /** 当前视频台词原文。 */
+    /** 场景生成模式：跟随视频剧情（默认）或按主题自编。 */
+    mode?: DialogueSceneMode;
+    /** 自编模式的主题关键词；视频模式忽略。 */
+    topic?: string;
+    /** 当前视频台词原文；自编模式可以留空。 */
     anchorText: string;
     /** 当前句及前后台词的快照。 */
     paragraphLines: string[];
