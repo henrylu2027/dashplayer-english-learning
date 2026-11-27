@@ -139,6 +139,9 @@ export default function OriginalShadowingPage() {
     const [savingWords, setSavingWords] = useState(false);
     const [result, setResult] = useState<ShadowingScoreVO | null>(null);
     const [outcome, setOutcome] = useState<{ passed: boolean; score: number } | null>(null);
+    // 结果常驻：记住这份结果属于哪一句，切换句子时不抹掉，只在新的评测后覆盖
+    const [resultText, setResultText] = useState<string | null>(null);
+    const [resultEntryId, setResultEntryId] = useState<string | null>(null);
     const [loadingQueue, setLoadingQueue] = useState(false);
 
     const recorded = useRecordedAttempt();
@@ -245,8 +248,7 @@ export default function OriginalShadowingPage() {
         clearAutoNext();
         stopAudio();
         recorded.reset();
-        setResult(null);
-        setOutcome(null);
+        // 结果反馈与逐词对比常驻：切句时保留上一次的评测，提交新录音后才覆盖
         setSelectedId(entryId);
     };
 
@@ -259,8 +261,6 @@ export default function OriginalShadowingPage() {
             return next?.id ?? previous;
         });
         recorded.reset();
-        setResult(null);
-        setOutcome(null);
     }, [entries, recorded, setSelectedId]);
 
     /** 顺序跟读：把当前视频全部分句一次性加入队列，保持视频原有顺序。 */
@@ -280,8 +280,6 @@ export default function OriginalShadowingPage() {
         clearAutoNext();
         stopAudio();
         recorded.reset();
-        setResult(null);
-        setOutcome(null);
         setSequenceEntries(next);
         setSequenceSelectedId(next[0]?.id ?? null);
         toast.success(t('originalShadowing.imported', { count: next.length }));
@@ -311,8 +309,6 @@ export default function OriginalShadowingPage() {
             clearAutoNext();
             stopAudio();
             recorded.reset();
-            setResult(null);
-            setOutcome(null);
             setMode('sequence');
         }
         setSequenceSelectedId(id);
@@ -343,8 +339,6 @@ export default function OriginalShadowingPage() {
             clearAutoNext();
             stopAudio();
             recorded.reset();
-            setResult(null);
-            setOutcome(null);
             setSrsEntries(next);
             setSrsSelectedId(next[0]?.id ?? null);
         } catch (error) {
@@ -367,8 +361,6 @@ export default function OriginalShadowingPage() {
         clearAutoNext();
         stopAudio();
         recorded.reset();
-        setResult(null);
-        setOutcome(null);
         setMode(next);
         if (next === 'srs') {
             void loadSrsQueue();
@@ -403,6 +395,9 @@ export default function OriginalShadowingPage() {
             const passed = response.result.score >= SRS_PASS_SCORE;
             setResult(response.result);
             setOutcome({ passed, score: response.result.score });
+            // 记住这份结果属于哪一句：后面切句时面板继续显示它
+            setResultText(selected.text);
+            setResultEntryId(selected.id);
             applyEntryResult(selected.id, response.result.score, passed);
 
             if (selected.cardId !== undefined) {
@@ -478,6 +473,8 @@ export default function OriginalShadowingPage() {
     const isScoring = recorded.phase === 'scoring' || evaluating;
     const pendingCount = useMemo(() => entries.filter((entry) => entry.status !== 'passed').length, [entries]);
     const canPlayOriginal = selected?.source.kind === 'video';
+    /** 面板里的结果是否属于另一句：属于其它句时提示「提交后更新」，不假装是这句的分数。 */
+    const resultStale = result !== null && resultEntryId !== null && resultEntryId !== selectedId;
 
     const handleMicClick = (): void => {
         if (!selected || isScoring) {
@@ -488,8 +485,7 @@ export default function OriginalShadowingPage() {
             return;
         }
         stopAudio();
-        setResult(null);
-        setOutcome(null);
+        // 保留上一次的评测结果，重新录音不改动面板；提交后才会被新结果覆盖
         void recorded.start();
     };
 
@@ -721,7 +717,7 @@ export default function OriginalShadowingPage() {
                                         size="sm"
                                         variant="outline"
                                         className="h-9 rounded-lg px-3 text-xs"
-                                        disabled={recorded.phase !== 'ready' || isScoring || outcome !== null}
+                                        disabled={recorded.phase !== 'ready' || isScoring}
                                         onClick={() => void handleSubmit()}
                                     >
                                         {isScoring ? (
@@ -785,10 +781,15 @@ export default function OriginalShadowingPage() {
                                         : 'border-amber-500/30 bg-amber-500/10',
                             )}
                         >
-                            <div className="flex items-center justify-between">
-                                <h2 className="text-sm font-medium text-foreground">
-                                    {t('originalShadowing.resultTitle')}
-                                </h2>
+                            <div className="flex items-center justify-between gap-3">
+                                <div className="flex min-w-0 items-baseline gap-2">
+                                    <h2 className="shrink-0 text-sm font-medium text-foreground">
+                                        {t('originalShadowing.resultTitle')}
+                                    </h2>
+                                    {result && resultText && (
+                                        <span className="truncate text-xs text-muted-foreground">· {resultText}</span>
+                                    )}
+                                </div>
                                 {result && (
                                     <Button
                                         type="button"
@@ -846,11 +847,13 @@ export default function OriginalShadowingPage() {
                                 </div>
                             </div>
                             <p className="mt-2 text-xs text-muted-foreground">
-                                {outcome === null
-                                    ? t('originalShadowing.resultHint')
-                                    : outcome.passed
-                                        ? t('originalShadowing.resultPassedHint')
-                                        : t('originalShadowing.resultFailedHint')}
+                                {resultStale
+                                    ? t('originalShadowing.resultStaleHint', { text: resultText ?? '' })
+                                    : outcome === null
+                                        ? t('originalShadowing.resultHint')
+                                        : outcome.passed
+                                            ? t('originalShadowing.resultPassedHint')
+                                            : t('originalShadowing.resultFailedHint')}
                             </p>
                         </section>
 

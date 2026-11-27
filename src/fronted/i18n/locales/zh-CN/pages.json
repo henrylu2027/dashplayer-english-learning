@@ -279,6 +279,7 @@
         "resultHint": "录音结束后点「提交评测」，得分不低于通过线即达标",
         "resultPassedHint": "已达标，即将自动进入下一句",
         "resultFailedHint": "未达标，这句已自动流入间隔复习池",
+        "resultStaleHint": "上面是「{{text}}」的评测结果，提交这句后更新",
         "addWords": "生词加入词汇工坊",
         "wordsAdded": "已加入 {{count}} 个生词到词汇工坊",
         "noProblemWords": "这句话全部读对了，没有要加入的生词",

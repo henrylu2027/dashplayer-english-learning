@@ -279,6 +279,7 @@
         "resultHint": "Record, then submit. Pass line is the threshold to move on",
         "resultPassedHint": "Passed, moving to the next line",
         "resultFailedHint": "Below the pass line; added to the spaced-review pool",
+        "resultStaleHint": "Above is the result for \"{{text}}\"; it updates when you submit this sentence",
         "addWords": "Send words to Vocabulary",
         "wordsAdded": "Added {{count}} words to the vocabulary studio",
         "noProblemWords": "Everything was read correctly",
