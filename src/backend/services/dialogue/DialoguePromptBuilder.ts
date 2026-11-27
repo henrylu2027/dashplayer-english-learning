@@ -3,7 +3,6 @@ import type {
     DialogueFocusLine,
     DialogueScene,
     DialogueSceneMode,
-    DialogueScript,
     DialogueStats,
     DialogueTurnVO,
 } from '@/common/contracts/dialogue';
@@ -29,246 +28,101 @@ const DIFFICULTY_LABEL: Record<DialogueDifficulty, string> = {
 };
 
 /**
- * 构建场景生成提示词。
+ * 构建场景生成提示词：基于视频剧情与本课核心词汇句型库，重新设计一段双人美式口语练习。
  *
- * 说明：场景必须与视频台词有明确关联，否则“从视频句出发”就只是形式；
- * 同时要求不预设年龄，场景选材面向所有学习者。
+ * 说明：目标是让学习者在熟悉的剧情里复用本课词汇与句型，而不是复述原台词；
+ * 视频模式锁定原剧情骨架，自编模式围绕主题自洽展开，两者输出同一套字段。
  *
- * @param params 锚点台词、周边台词与难度。
+ * @param params 模式、主题、锚点、剧情片段、本课台词与难度。
  * @returns 交给结构化生成的单条提示词。
  */
-export const buildScenePrompt = (params: {
+export const buildLessonScenePrompt = (params: {
+    /** 场景生成模式。 */
+    mode: DialogueSceneMode;
+    /** 自编模式的主题关键词。 */
+    topic: string;
     /** 锚定的视频台词。 */
     anchorText: string;
     /** 当前句及前后台词的快照。 */
     paragraphLines: string[];
+    /** 本课核心词汇句型库：学习者练过的台词。 */
+    focusLines: DialogueFocusLine[];
     /** 难度。 */
     difficulty: DialogueDifficulty;
-    /** 学习者练过的台词；有值时场景必须复用这些原句。 */
-    focusLines?: DialogueFocusLine[];
 }): string => {
     const contextLines = params.paragraphLines.length > 0
         ? params.paragraphLines.map((line, index) => `${index + 1}. ${line}`).join('\n')
         : '（无）';
-    const focusLines = params.focusLines ?? [];
-    const hasFocus = focusLines.length >= 2;
-    const focusBlock = hasFocus
+    const focusBlock = params.focusLines.length > 0
+        ? params.focusLines
+            .map((line, index) => `${index + 1}. 「${line.en}」${line.zh ? `（${line.zh}）` : ''}`)
+            .join('\n')
+        : '（无，按剧情片段自行提炼本课核心词句）';
+    const material = params.mode === 'custom'
         ? [
+            '主题：',
+            `「${params.topic}」`,
             '',
-            '学习者反复练习过下面这些台词（来自他们的跟读与复习记录）：',
-            focusLines.map((line, index) => `${index + 1}. 「${line.en}」${line.zh ? `（${line.zh}）` : ''}`).join('\n'),
-            '',
-            '# 取材要求（优先级最高）',
-            '- 场景必须让上面这些台词原样出现在对话里：逐字一致，不改时态、不换同义词、不省略。',
-            '- targetExpressions 必须从这些台词里按顺序取 3~5 句：en 与原文逐字一致，zh 给出该句准确的中文意思。',
-            '- 即使上面某句没有附中文，也要在 zh 里补上它准确的中文意思，不允许留空。',
-            '- 情境要能自然地承接这些句子；不要为了凑句子硬拼互不相关的情节。',
+            '（自编模式，没有原视频剧情，请围绕主题设计一套逻辑自洽的生活化美式小剧情。）',
         ]
-        : [];
+        : [
+            '视频剧情存档（当前句及前后台词）：',
+            contextLines,
+            '',
+            '本课核心词汇句型库（学习者练过、复习过的台词）：',
+            focusBlock,
+            '',
+            `当前锚点台词：「${params.anchorText}」`,
+        ];
     return [
-        '你在为英语学习工具设计一个角色扮演场景。学习者刚在视频里听到这句台词：',
-        `「${params.anchorText}」`,
+        '请基于视频剧情存档和本课核心词汇句型库，生成一个新的双人美式口语练习场景。',
+        '目标是让学习者在熟悉的剧情中复用本课词汇、短语、句型和语法，而不是简单复述原视频台词。',
         '',
-        '当前句及前后台词：',
-        contextLines,
-        ...focusBlock,
+        ...material,
         '',
-        `语言难度：${DIFFICULTY_LABEL[params.difficulty]}（${DIFFICULTY_GUIDE[params.difficulty]}）`,
+        `学习者水平：${DIFFICULTY_LABEL[params.difficulty]}（${DIFFICULTY_GUIDE[params.difficulty]}）`,
         '',
-        '# 设计要求',
-        '- 场景与台词有明确关联：可以是台词发生的情境，也可以是由这句台词自然延伸的同类情境。',
-        '- 场景要能来回多轮：有明确的双方诉求或话题，不要一问一答就结束。',
-        '- 双方角色自然、地位平等，不预设学习者年龄，不要设计儿童专属场景。',
-        '- 不要给学习者或 AI 角色起具体人名，用「你」「对方」或通用身份（如“店员”“旅客”）描述。',
-        hasFocus
-            ? '- 参考句式 3~5 句：按上面的「取材要求」从练习过的台词里选，不要另外新编表达。'
-            : '- 参考句式 3~5 句（默认 4 句）：都是这个场景里真会用到的英文表达，难度符合上面的档位。',
-        '- 开场白由 AI 角色先说，1~2 句英文，能自然引出学习者的回应；中文只用于设定和解说，台词必须是英文。',
-        '- title 必须是英文，不超过 6 个词；openingHintZh 是一句中文，说明开场白的意思或学习者可以怎么接。',
+        '你必须严格做到：',
+        params.mode === 'custom'
+            ? '1. 场景围绕给定主题，剧情逻辑自洽，人物关系与诉求清楚。'
+            : '1. 锁定原视频剧情骨架：保持场景地点、人物身份、人物情绪、人物诉求、当前任务、关键事实和主线不变；',
+        '2. 保持学习目标：对话主体必须优先使用本课核心词汇、短语、句型和语法；',
+        '3. 允许重新设计对话：可以改变切入角度、提问方式、回应方式、语气、表达顺序和句式结构；',
+        '4. 控制新词：新增拓展词不超过2个，且必须与场景紧密相关、难度适合学习者当前水平；',
+        params.mode === 'custom'
+            ? '5. 禁止生成无关支线，禁止改变人物关系，禁止新增第三人。'
+            : '5. 禁止生成无关支线，禁止改变人物关系，禁止新增视频中不存在的人物、事件和物品；',
+        '6. 对话必须自然、简短、口语化，适合美式口语练习。',
         '',
-        '# 输出要求',
-        '只输出一个 JSON 对象，不要输出任何其他文字或 Markdown 代码块，字段如下：',
+        '输出要求：',
+        '- characters 中说明：A 是学习者，B 是 AI 陪练（用中文描述角色身份）。',
+        '- 台词里不要用「A」「B」当称呼或人名，双方只由 speaker 字段区分；需要称呼时用角色身份（如 sir、honey、老师）。',
+        '- dialogue 由 B 先开口；A 的每一句都要带 practice_focus，用一句中文点明这句在练哪个词句或语法。',
+        '- practice_points 的 core_words / core_phrases / core_sentences / grammar_focus 必须来自本课词汇句型库（自编模式则围绕主题给出同等难度的核心词句），core_sentences 给 3~5 句。',
+        '- replacements 给 3~6 条可替换表达：from 是对话里出现过的说法，to 是更口语或同义的说法，note 是一句中文说明。',
+        '- extra_vocabulary 最多 2 个新词，每个给 word / zh / usage（本场景里怎么用）。',
+        '- 只输出一个 JSON 对象，不要输出任何其他文字或 Markdown 代码块，字段如下：',
         '{',
-        '  "title": "英文短标题（用于历史列表）",',
-        '  "settingZh": "中文场景设定，一到两句",',
-        '  "aiRole": "AI 扮演的角色（中文描述）",',
-        '  "userRole": "学习者扮演的角色（中文描述）",',
-        '  "targetExpressions": [{"en": "英文表达", "zh": "中文释义"}],',
-        '  "openingLineEn": "AI 的开场白（英文）",',
-        '  "openingHintZh": "开场白的中文提示"',
+        '  "scene_title": "英文短标题，不超过 6 个词",',
+        '  "scene_context": "中文场景背景，一到两句",',
+        '  "characters": {"a": "学习者扮演的角色（中文）", "b": "AI 扮演的角色（中文）"},',
+        '  "dialogue": [{"speaker": "B", "en": "英文台词"}, {"speaker": "A", "en": "英文台词", "practice_focus": "这句在练什么"}],',
+        '  "practice_points": {',
+        '    "core_words": ["单词"],',
+        '    "core_phrases": ["短语"],',
+        '    "core_sentences": ["句型或整句"],',
+        '    "grammar_focus": ["语法点"]',
+        '  },',
+        '  "replacements": [{"from": "原说法", "to": "替换说法", "note": "中文说明"}],',
+        '  "extra_vocabulary": [{"word": "新词", "zh": "中文意思", "usage": "本场景用法"}]',
         '}',
     ].join('\n');
 };
-
-/**
- * 把剧本格式化为「角色名：台词」的多行文本。
- *
- * @param script 剧本。
- * @returns 逐行台词；有译文时附在括号里。
- */
-const formatScriptLines = (
-    script: DialogueScript,
-    lines: DialogueScript['lines'] = script.lines,
-): string => lines
-    .map((line) => {
-        const name = line.speaker === 'a' ? script.roleAName : script.roleBName;
-        const zh = line.zh?.trim();
-        return zh ? `${name}：${line.en}（${zh}）` : `${name}：${line.en}`;
-    })
-    .join('\n');
-
-/** 场景提示词里最多带几句台词；整部字幕太长，只取锚点附近这一段。 */
-const PROMPT_SCRIPT_LINES = 12;
-
-/**
- * 构建「跟着原片演」的场景提示词。
- *
- * 说明：与 `buildScenePrompt` 的区别是场景不再由模型另编，而是围绕一段真实字幕展开；
- * 角色名、目标表达、开场白都锁定到剧本内，避免模型改名或编台词。
- *
- * @param params 锚点台词、剧本与难度。
- * @returns 交给结构化生成的单条提示词。
- */
-export const buildScriptScenePrompt = (params: {
-    /** 锚定的视频台词。 */
-    anchorText: string;
-    /** 从视频截取的真实台词。 */
-    script: DialogueScript;
-    /** 难度。 */
-    difficulty: DialogueDifficulty;
-}): string => {
-    const { script } = params;
-    const aiName = script.learnerRole === 'a' ? script.roleBName : script.roleAName;
-    const learnerName = script.learnerRole === 'a' ? script.roleAName : script.roleBName;
-    return [
-        '你在为英语学习工具设计一个角色扮演场景。学习者要跟着一段真实视频对话演一遍。',
-        '',
-        '原片剧本（来自视频字幕，按播放顺序，逐字照抄）：',
-        formatScriptLines(script, (() => {
-            const start = Math.max(0, script.lines.findIndex((line) => line.index >= script.startIndex));
-            return script.lines.slice(start, start + PROMPT_SCRIPT_LINES);
-        })()),
-        '',
-        '剧本里只有两个人：',
-        `- ${script.roleAName}（说话人 A）`,
-        `- ${script.roleBName}（说话人 B）`,
-        '',
-        `学习者扮演：${learnerName}`,
-        `你（AI）扮演：${aiName}`,
-        '',
-        `锚点台词：「${params.anchorText}」`,
-        `语言难度：${DIFFICULTY_LABEL[params.difficulty]}（${DIFFICULTY_GUIDE[params.difficulty]}）`,
-        '',
-        '# 设计要求',
-        '- 场景设定必须来自上面这段对话的情境，不要另编互不相关的情节。',
-        '- aiRole 填你扮演的角色，userRole 填学习者扮演的角色；两人都用剧本里给出的名字，不要改名、不要新增第三个角色。',
-        '- targetExpressions 从上面剧本里按顺序取 3~5 句：en 与原文逐字一致，zh 给出该句准确的中文意思（剧本里有译文就直接用）。',
-        `- openingLineEn 必须是 ${aiName} 在剧本里说过的英文，逐字照抄，不要改写。`,
-        '- openingHintZh 是一句中文，说明开场白的意思或学习者可以怎么接。',
-        '- title 必须是英文，不超过 6 个词。',
-        '',
-        '# 输出要求',
-        '只输出一个 JSON 对象，不要输出任何其他文字或 Markdown 代码块，字段如下：',
-        '{',
-        '  "title": "英文短标题（用于历史列表）",',
-        '  "settingZh": "中文场景设定，一到两句",',
-        '  "aiRole": "AI 扮演的角色（用剧本里的名字）",',
-        '  "userRole": "学习者扮演的角色（用剧本里的名字）",',
-        '  "targetExpressions": [{"en": "英文表达", "zh": "中文释义"}],',
-        '  "openingLineEn": "AI 的开场白（英文，逐字取自剧本）",',
-        '  "openingHintZh": "开场白的中文提示"',
-        '}',
-    ].join('\n');
-};
-
-/**
- * 构建对话系统人设。
- *
- * 说明：人设只包含模型无法自行推导的场景信息与行为规则；
- * 不要求模型逐轮点评——复盘在结束时统一生成，避免打断角色扮演。
- *
- * @param params 场景卡与难度。
- * @returns 作为 system 消息的完整人设。
- */
-export const buildDialogueSystemPrompt = (params: {
-    /** 场景卡。 */
-    scene: DialogueScene;
-    /** 难度。 */
-    difficulty: DialogueDifficulty;
-}): string => {
-    const targets = params.scene.targetExpressions
-        .map((item) => (item.zh.trim() ? `- ${item.en}（${item.zh}）` : `- ${item.en}`))
-        .join('\n');
-    return [
-        '# 角色扮演规则',
-        '你正在和一位英语学习者进行角色扮演练习。',
-        `场景：${params.scene.settingZh}`,
-        `你扮演：${params.scene.aiRole}`,
-        `对方扮演：${params.scene.userRole}`,
-        '',
-        '本场景的目标表达（不要求对方全部用上，也不要逐条点名要求）：',
-        targets,
-        '',
-        `语言难度：${DIFFICULTY_LABEL[params.difficulty]}（${DIFFICULTY_GUIDE[params.difficulty]}）`,
-        '',
-        '# 行为规则',
-        '- 只说英文，保持角色身份，每次回复 1~3 句，像真实对话一样自然。',
-        '- 不要解释语法、不要点评、不要跳出角色，也不要替对方说台词。',
-        '- 对方明显没听懂或用中文求助时，先用一行「（提示：……）」给一句中文解释，再用英文继续。',
-        '- 对方用中文回答时，用英文自然回应，并可以顺带用一次目标表达做示范。',
-        '- 不要输出 Markdown、列表、标题或任何格式标记，只输出对话内容。',
-    ].join('\n');
-};
-
-/**
- * 构建「AI 生成全新场景」的提示词。
- *
- * 说明：不依赖任何视频素材，只按主题写一套逻辑自洽的生活化美式小剧情；
- * 输出结构与跟随视频模式共用同一个场景 schema。
- *
- * @param params 主题关键词与难度。
- * @returns 交给结构化生成的单条提示词。
- */
-export const buildCustomScenePrompt = (params: {
-    /** 主题关键词。 */
-    topic: string;
-    /** 难度。 */
-    difficulty: DialogueDifficulty;
-}): string => [
-    '你在为英语学习工具设计一个角色扮演场景，主题由学习者指定：',
-    `「${params.topic}」`,
-    '',
-    `语言难度：${DIFFICULTY_LABEL[params.difficulty]}（${DIFFICULTY_GUIDE[params.difficulty]}）`,
-    '',
-    '# 设计要求',
-    '- 围绕这个主题写一套生活化的美式小剧情：有明确的双方面临的问题或诉求，能来回聊多轮。',
-    '- 不预设学习者年龄，不要儿童专属场景；双方角色平等。',
-    '- title 必须是英文，不超过 6 个词。',
-    '- aiRole 与 userRole 用通用身份（如“店员”“旅客”），不要起具体人名。',
-    '- targetExpressions 给 3~5 句这个场景里真会用到的完整英文句，zh 给出准确中文意思。',
-    '- openingLineEn 是 AI 角色的开场白，1 句英文，能引出学习者的回应；openingHintZh 是一句中文提示。',
-    '',
-    '# 输出要求',
-    '只输出一个 JSON 对象，不要输出其他文字或 Markdown 代码块，字段如下：',
-    '{',
-    '  "title": "英文短标题",',
-    '  "settingZh": "中文场景设定，一到两句",',
-    '  "aiRole": "AI 扮演的角色（中文描述）",',
-    '  "userRole": "学习者扮演的角色（中文描述）",',
-    '  "targetExpressions": [{"en": "英文表达", "zh": "中文释义"}],',
-    '  "openingLineEn": "AI 的开场白（英文）",',
-    '  "openingHintZh": "开场白的中文提示"',
-    '}',
-].join('\n');
 
 /**
  * 构建场景对话的固定 system prompt。
  *
- * 说明：这是对话链路的唯一人设，每次请求都原样携带，保证多轮之间口径一致。
- * 核心是把「角色台词」与「评测纠错」在同一份输出里严格分开：
- * 台词只进对话气泡，评测只进右侧面板，两边绝不互相污染。
- *
- * @param params 场景卡与难度。
+ * @param params 场景卡、难度与模式。
  * @returns 作为 system 消息的固定人设。
  */
 export const buildDialogueTurnSystemPrompt = (params: {
@@ -316,7 +170,7 @@ export const buildDialogueTurnSystemPrompt = (params: {
         '- 用户卡壳、说不出话：不直接替用户回答；参考句式区域已给出 1~2 句场景内参考提示句式。',
         '- 用户表达语法没问题但不够地道：正常回复角色台词，地道优化、连读弱读建议写在评测 comment 里，不要在对话气泡里面说教、纠错。',
         '- 所有语法纠错、发音点评、生词提取全部放在评测结果板块，对话气泡只做角色对话。',
-        '7. 台词里不能出现中文、括号旁白、动作描写、表情、解释或单词释义。',
+        '7. 台词里不能出现中文、括号旁白、动作描写、表情、解释或单词释义；称呼对方时用角色身份，不要把「A」「B」当作名字或称呼。',
         '',
         '【评测要求】只评学习者刚说的这一句，不评你自己，也不评更早的内容。',
         '- overall：综合分 0~100，按能否在这个场景把意思说清楚打分。',

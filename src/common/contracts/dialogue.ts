@@ -72,10 +72,79 @@ export const dialogueSceneSchema = z.object({
     openingLineEn: z.string().min(1),
     /** 开场白的中文提示。 */
     openingHintZh: z.string().min(1),
+    /** 本课练习点；旧数据没有这一块，读取时可以为空。 */
+    practice: z.object({
+        /** 核心词汇。 */
+        coreWords: z.array(z.string()),
+        /** 核心短语。 */
+        corePhrases: z.array(z.string()),
+        /** 核心句型。 */
+        coreSentences: z.array(z.string()),
+        /** 语法重点。 */
+        grammarFocus: z.array(z.string()),
+        /** 可替换表达。 */
+        replacements: z.array(z.object({
+            from: z.string(),
+            to: z.string(),
+            note: z.string(),
+        })),
+        /** 拓展新词（最多两个）。 */
+        extraVocabulary: z.array(z.object({
+            word: z.string(),
+            zh: z.string(),
+            usage: z.string(),
+        })),
+    }).optional(),
 });
 
 /** 场景类型。 */
 export type DialogueScene = z.infer<typeof dialogueSceneSchema>;
+
+/**
+ * 场景生成的模型输出契约（字段名与产品约定一致）。
+ *
+ * 说明：这是「基于视频剧情 + 本课核心词汇句型库」重新设计的双人练习场景；
+ * 服务端把它映射成界面用的 DialogueScene，学员看到的是同一份内容的两种视角。
+ */
+export const dialogueSceneDraftSchema = z.object({
+    /** 英文短标题。 */
+    scene_title: z.string().min(1),
+    /** 中文场景背景。 */
+    scene_context: z.string().min(1),
+    /** A 是学习者，B 是 AI 陪练。 */
+    characters: z.object({
+        a: z.string().min(1),
+        b: z.string().min(1),
+    }),
+    /** 对话样例：B 先开口，A 的句子带 practice_focus。 */
+    dialogue: z.array(z.object({
+        speaker: z.enum(['A', 'B']),
+        en: z.string().min(1),
+        practice_focus: z.string().optional(),
+    })).min(2).max(12),
+    /** 本课练习点。 */
+    practice_points: z.object({
+        core_words: z.array(z.string()).max(12),
+        core_phrases: z.array(z.string()).max(12),
+        core_sentences: z.array(z.string()).max(8),
+        grammar_focus: z.array(z.string()).max(6),
+    }),
+    /** 可替换表达。 */
+    replacements: z.array(z.object({
+        from: z.string().min(1),
+        to: z.string().min(1),
+        note: z.string(),
+    })).max(8),
+    /** 拓展新词，最多两个。 */
+    extra_vocabulary: z.array(z.object({
+        word: z.string().min(1),
+        zh: z.string(),
+        usage: z.string(),
+    })).max(2),
+});
+
+/** 场景生成草稿类型。 */
+export type DialogueSceneDraft = z.infer<typeof dialogueSceneDraftSchema>;
 
 /**
  * 复盘生成的结构化输出契约。

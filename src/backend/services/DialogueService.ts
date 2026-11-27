@@ -18,7 +18,7 @@ import {
     DIALOGUE_SPEAKERS,
     dialogueCorrectionDraftSchema,
     dialogueReviewDraftSchema,
-    dialogueSceneSchema,
+    dialogueSceneDraftSchema,
     dialogueTurnReplySchema,
     type DialogueAvailability,
     type DialogueCreateRequest,
@@ -48,6 +48,7 @@ import {
     type DialogueCorrectionItem,
     type DialogueReplyTurnRequest,
     type DialogueReplyTurnResult,
+    type DialogueSceneDraft,
     type DialogueTurnEvaluation,
     type DialogueTurnReplyDraft,
 } from '@/common/contracts/dialogue';
@@ -55,12 +56,10 @@ import { normalizeShadowingSource } from '@/backend/services/shadowing/Shadowing
 import { normalizeWord, tokenizeForScoring } from '@/common/utils/wordTokens';
 import {
     buildCorrectionPrompt,
-    buildCustomScenePrompt,
     buildDialogueTurnPrompt,
     buildDialogueTurnSystemPrompt,
+    buildLessonScenePrompt,
     buildReviewPrompt,
-    buildScenePrompt,
-    buildScriptScenePrompt,
 } from '@/backend/services/dialogue/DialoguePromptBuilder';
 
 /**
@@ -431,7 +430,6 @@ export class DialogueServiceImpl implements DialogueService {
                 anchorText,
                 paragraphLines,
                 focusLines,
-                script,
                 difficulty: request.difficulty,
                 backend: request.backend,
             });
@@ -713,8 +711,12 @@ export class DialogueServiceImpl implements DialogueService {
 
     /**
      * 生成场景卡：本地走 llama-server 的结构化生成，云端走 generateObject。
-     * @param params 锚点、上下文、难度与后端。
-     * @returns 通过 schema 校验的场景卡。
+     *
+     * 模型输出的是产品约定的练习场景结构（scene_title / dialogue / practice_points …），
+     * 这里转成界面与后续对话使用的 DialogueScene。
+     *
+     * @param params 模式、主题、锚点、上下文、本课台词、难度与后端。
+     * @returns 通过校验并已映射好的场景卡。
      */
     private async generateScene(params: {
         /** 场景生成模式。 */
@@ -723,37 +725,96 @@ export class DialogueServiceImpl implements DialogueService {
         topic: string;
         anchorText: string;
         paragraphLines: string[];
-        /** 学习者练过的台词；有值时场景必须复用这些原句。 */
+        /** 本课核心词汇句型库：学习者练过的台词。 */
         focusLines: DialogueFocusLine[];
-        /** 真实台词剧本；有值时按剧本生成，不再另编场景。 */
-        script: DialogueScript | null;
         difficulty: DialogueCreateRequest['difficulty'];
         backend: DialogueModelBackend;
     }): Promise<DialogueScene> {
-        const prompt = params.mode === 'custom'
-            ? buildCustomScenePrompt({ topic: params.topic, difficulty: params.difficulty })
-            : params.script
-                ? buildScriptScenePrompt({
-                    anchorText: params.anchorText,
-                    script: params.script,
-                    difficulty: params.difficulty,
-                })
-                : buildScenePrompt(params);
+        const prompt = buildLessonScenePrompt({
+            mode: params.mode,
+            topic: params.topic,
+            anchorText: params.anchorText,
+            paragraphLines: params.paragraphLines,
+            focusLines: params.focusLines,
+            difficulty: params.difficulty,
+        });
+        let draft: DialogueSceneDraft;
         if (params.backend === 'local') {
             const modelId = await this.localAiService.getActiveModelId();
             const raw = await this.localAiService.generate(
                 prompt,
-                z.toJSONSchema(dialogueSceneSchema),
+                z.toJSONSchema(dialogueSceneDraftSchema),
                 modelId,
             );
-            return dialogueSceneSchema.parse(raw);
+            draft = dialogueSceneDraftSchema.parse(raw);
+        } else {
+            const model = this.aiProviderService.getModel('sentenceLearning');
+            if (!model) {
+                throw new Error(CLOUD_AI_NOT_CONFIGURED_MESSAGE);
+            }
+            const result = await generateObject({ model, schema: dialogueSceneDraftSchema, prompt });
+            draft = result.object;
         }
-        const model = this.aiProviderService.getModel('sentenceLearning');
-        if (!model) {
-            throw new Error(CLOUD_AI_NOT_CONFIGURED_MESSAGE);
-        }
-        const result = await generateObject({ model, schema: dialogueSceneSchema, prompt });
-        return result.object;
+        return this.toScene(draft);
+    }
+
+    /**
+     * 去掉台词里把「A」「B」当称呼的尾巴（如 "Don't lose your phone, A."）。
+     * @param text 台词。
+     * @returns 干净的台词。
+     */
+    private static stripRoleAddress(text: string): string {
+        return text
+            // 「Hey, A.」这类逗号称呼
+            .replace(/,\s*[AB]\b(?=\s*[.!?,]|$)/g, '')
+            // 「A. You said…」这类句首称呼，以及句尾单独出现的 A / B
+            .replace(/\b[AB]\b(?=\s*[.!?]|$)/g, '')
+            .replace(/\s+([.,!?])/g, '$1')
+            .replace(/\s{2,}/g, ' ')
+            .trim();
+    }
+
+    /**
+     * 把模型的练习场景草稿映射成界面用的场景卡。
+     * @param draft 通过 schema 校验的草稿。
+     * @returns 场景卡；参考句式固定 3~5 句、开场白由 B 先开口。
+     */
+    private toScene(draft: DialogueSceneDraft): DialogueScene {
+        const targets: string[] = [];
+        const push = (text: string): void => {
+            const trimmed = DialogueServiceImpl.stripRoleAddress(text);
+            if (trimmed.length > 0 && !targets.some((item) => item.toLowerCase() === trimmed.toLowerCase())) {
+                targets.push(trimmed);
+            }
+        };
+        // 优先用核心句型；不够 3 句时用对话里 A 的台词补齐，保证场景卡有可点读的参考句
+        draft.practice_points.core_sentences.forEach(push);
+        draft.dialogue.filter((line) => line.speaker === 'A').forEach((line) => push(line.en));
+        draft.dialogue.forEach((line) => push(line.en));
+        // 开场白要有内容：优先第一句 B 的完整台词，避免 "Oh." 这种单字开场
+        const bLines = draft.dialogue.filter((line) => line.speaker === 'B');
+        const opening = bLines.find((line) => tokenizeForScoring(line.en).length >= 3)
+            ?? bLines[0]
+            ?? draft.dialogue[0];
+        const firstLearnerLine = draft.dialogue.find((line) => line.speaker === 'A');
+        return {
+            title: draft.scene_title.trim(),
+            settingZh: draft.scene_context.trim(),
+            aiRole: draft.characters.b.trim(),
+            userRole: draft.characters.a.trim(),
+            targetExpressions: targets.slice(0, 5).map((en) => ({ en, zh: '' })),
+            openingLineEn: DialogueServiceImpl.stripRoleAddress(opening.en),
+            openingHintZh: firstLearnerLine?.practice_focus?.trim()
+                || (firstLearnerLine ? `试着回应：${firstLearnerLine.en}` : '轮到你了，试着回应一句。'),
+            practice: {
+                coreWords: draft.practice_points.core_words,
+                corePhrases: draft.practice_points.core_phrases,
+                coreSentences: draft.practice_points.core_sentences,
+                grammarFocus: draft.practice_points.grammar_focus,
+                replacements: draft.replacements,
+                extraVocabulary: draft.extra_vocabulary,
+            },
+        };
     }
 
     /**
@@ -876,6 +937,8 @@ export class DialogueServiceImpl implements DialogueService {
                 ? parts.slice(Math.max(0, questionIndex - 1), questionIndex + 1).join(' ').trim()
                 : parts[0].trim();
         }
+        // 去掉把「A」「B」当称呼的尾巴
+        text = DialogueServiceImpl.stripRoleAddress(text);
         if (tokenizeForScoring(text).length > MAX_REPLY_WORDS) {
             this.logger.warn('dialogue reply longer than expected', { words: tokenizeForScoring(text).length });
         }
