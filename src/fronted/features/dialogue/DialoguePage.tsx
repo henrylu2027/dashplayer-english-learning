@@ -429,11 +429,13 @@ export default function DialoguePage() {
                     session={active.session}
                     scene={active.scene}
                     script={active.script}
+                    history={history}
                     onFinished={(session, result) => {
                         void handleFinished(session, result);
                     }}
                     onSpeak={speak}
                     onBack={() => setActive(null)}
+                    onOpenHistory={(id) => void handleOpenHistory(id)}
                 />
             );
         }

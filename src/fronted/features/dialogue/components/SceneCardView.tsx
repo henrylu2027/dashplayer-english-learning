@@ -1,28 +1,35 @@
+import type { ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Volume2 } from 'lucide-react';
 
 import type { DialogueScene } from '@/common/contracts/dialogue';
 
 /**
- * 场景卡：设定、双方角色与目标表达。
+ * 场景卡：设定、双方角色与参考句式。
  *
  * @param props.scene 场景卡。
- * @param props.onSpeak 朗读目标表达。
+ * @param props.onSpeak 朗读参考句式。
+ * @param props.actions 场景信息区右上角的操作按钮（重置对话、返回列表）。
  */
 export default function SceneCardView({
     scene,
     onSpeak,
+    actions,
 }: {
     scene: DialogueScene;
     onSpeak: (text: string) => void;
+    actions?: ReactNode;
 }) {
     const { t } = useTranslation('pages');
     return (
         <section className="flex flex-col gap-3 rounded-2xl border border-border/60 bg-card p-5 shadow-xs">
-            <div>
-                <div className="text-[11px] uppercase tracking-wide text-muted-foreground">{t('dialogue.sceneTitle')}</div>
-                <h2 className="mt-0.5 text-base font-medium text-foreground">{scene.title}</h2>
-                <p className="mt-1 text-sm leading-6 text-foreground/80">{scene.settingZh}</p>
+            <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                    <div className="text-[11px] uppercase tracking-wide text-muted-foreground">{t('dialogue.sceneTitle')}</div>
+                    <h2 className="mt-0.5 text-base font-medium text-foreground">{scene.title}</h2>
+                    <p className="mt-1 text-sm leading-6 text-foreground/80">{scene.settingZh}</p>
+                </div>
+                {actions && <div className="flex shrink-0 flex-wrap items-center gap-1.5">{actions}</div>}
             </div>
 
             <div className="grid gap-2 text-sm sm:grid-cols-2">

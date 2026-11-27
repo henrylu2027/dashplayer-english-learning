@@ -60,8 +60,8 @@ export const dialogueSceneSchema = z.object({
     aiRole: z.string().min(1),
     /** 学习者扮演的角色（中文描述）。 */
     userRole: z.string().min(1),
-    /** 目标表达，2~4 个；优先 3 个，给模型留出少量容错。 */
-    targetExpressions: z.array(dialogueTargetExpressionSchema).min(2).max(4),
+    /** 参考句式：3~5 句贴合场景的地道例句，作为表达提示而非硬性要求。 */
+    targetExpressions: z.array(dialogueTargetExpressionSchema).min(3).max(5),
     /** AI 的开场白，英文。 */
     openingLineEn: z.string().min(1),
     /** 开场白的中文提示。 */

@@ -22,9 +22,12 @@ const KIND_LABEL_KEY: Record<string, string> = {
 export default function CorrectionCard({
     correction,
     pending,
+    spokenText,
 }: {
     correction: DialogueCorrection | null;
     pending: boolean;
+    /** 学习者这句的原文，用于给出连读/弱读建议。 */
+    spokenText?: string;
 }) {
     const { t } = useTranslation('pages');
 
@@ -41,8 +44,10 @@ export default function CorrectionCard({
     }
     if (correction.items.length === 0) {
         return (
-            <div className="mt-1.5 max-w-[85%] rounded-xl border border-emerald-500/25 bg-emerald-500/5 px-3 py-1.5 text-[11px] text-emerald-700 dark:text-emerald-400">
-                {t('dialogue.correctionClean')}
+            <div className="mt-1.5 max-w-[85%] rounded-xl border border-emerald-500/25 bg-emerald-500/5 px-3 py-1.5 text-[11px] leading-5 text-emerald-700 dark:text-emerald-400">
+                {spokenText
+                    ? t('dialogue.correctionSuggestion', { text: spokenText })
+                    : t('dialogue.correctionClean')}
             </div>
         );
     }

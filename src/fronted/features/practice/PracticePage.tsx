@@ -404,9 +404,9 @@ export default function PracticePage() {
                 <PageHeader title={t('practice.title')} description={t('practice.description')} />
             </div>
 
-            <div className="flex-1 min-h-0 overflow-y-auto px-6 pb-6 pt-2">
-                <div className="mx-auto grid w-full max-w-5xl gap-4 lg:grid-cols-[minmax(0,1fr)_240px]">
-                    <div className="flex min-w-0 flex-col gap-4">
+            <div className="flex-1 min-h-0 px-6 pb-6 pt-2">
+                <div className="mx-auto grid w-full max-w-5xl gap-4 lg:h-full lg:grid-cols-[minmax(0,1fr)_240px]">
+                    <div className="flex min-w-0 flex-col gap-4 lg:min-h-0 lg:overflow-y-auto lg:pr-1">
                         {/* 听写 / 复述 */}
                         <div className="flex gap-1 rounded-xl bg-muted p-1">
                             {(['dictation', 'retell'] as const).map((item) => (
@@ -829,8 +829,8 @@ export default function PracticePage() {
                     </div>
 
                     {/* 右侧：句子队列（每句一条原声） */}
-                    <aside className="flex min-w-0 flex-col gap-3">
-                        <section className="flex min-h-0 flex-1 flex-col rounded-2xl border border-border/60 bg-card p-3 shadow-xs">
+                    <aside className="flex min-w-0 flex-col gap-3 lg:min-h-0">
+                        <section className="flex min-h-0 flex-1 flex-col rounded-2xl border border-border/60 bg-card p-3 shadow-xs lg:max-h-full">
                             <Button
                                 type="button"
                                 size="sm"

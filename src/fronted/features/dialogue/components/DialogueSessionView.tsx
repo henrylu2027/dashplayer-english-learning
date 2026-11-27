@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import toast from 'react-hot-toast';
-import { ArrowLeft, CheckCheck, Loader2, Play, RotateCcw, Volume2 } from 'lucide-react';
+import { ArrowLeft, BookOpen, CheckCheck, Loader2, Play, RotateCcw, Volume2 } from 'lucide-react';
 
 import type {
     DialogueCorrection,
@@ -16,6 +16,7 @@ import type { RetellResult } from '@/common/contracts/practice';
 import { DIALOGUE_DIFFICULTIES } from '@/common/contracts/dialogue';
 import { Button } from '@/fronted/components/ui/button';
 import { practiceApi } from '@/fronted/features/practice/practiceApi';
+import { srsApi } from '@/fronted/features/srs/srsApi';
 import { videoLearningApi } from '@/fronted/features/video-learning/videoLearningApi';
 import { getTtsUrl, playAudioUrlAndWait } from '@/fronted/infrastructure/audio/AudioPlayer';
 import { getRendererLogger } from '@/fronted/log/simple-logger';
@@ -23,6 +24,7 @@ import { cn } from '@/fronted/lib/utils';
 import { dialogueApi } from '../dialogueApi';
 import CorrectionCard from './CorrectionCard';
 import DialogueComposer from './DialogueComposer';
+import HistoryList from './HistoryList';
 import SceneCardView from './SceneCardView';
 import SpeechScorePanel from './SpeechScorePanel';
 
@@ -35,6 +37,25 @@ const AI_LINE_DELAY_MS = 400;
 const DIFFICULTY_LABEL = 'dialogue.difficulty';
 
 /**
+ * 气泡上方的角色标识：说话人 A/B + 是 AI 还是用户。
+ *
+ * @param speaker 剧本里的说话人。
+ * @param role 这条消息是 AI 还是用户说的。
+ * @param script 剧本，取角色名。
+ * @returns 形如「A · Rose（用户）」的标签。
+ */
+function dialogueSpeakerLabel(
+    speaker: DialogueSpeaker | undefined,
+    role: 'assistant' | 'user',
+    script: DialogueScript,
+): string {
+    const tag = speaker === 'a' ? 'A' : speaker === 'b' ? 'B' : '';
+    const name = speaker === 'a' ? script.roleAName : speaker === 'b' ? script.roleBName : '';
+    const who = role === 'assistant' ? 'AI' : '用户';
+    return name ? `${tag} · ${name}（${who}）` : `${tag}（${who}）`;
+}
+
+/**
  * 对话中的一条消息。
  */
 interface ScriptedItem {
@@ -42,6 +63,8 @@ interface ScriptedItem {
     id: string;
     /** 说话方。 */
     role: 'assistant' | 'user';
+    /** 剧本里的说话人标签，用于显示 A / B。 */
+    speaker?: DialogueSpeaker;
     /** 英文内容。 */
     text: string;
     /** 中文提示；只有 AI 台词带。 */
@@ -90,16 +113,22 @@ export default function DialogueSessionView({
     session,
     scene,
     script,
+    history,
     onFinished,
     onSpeak,
     onBack,
+    onOpenHistory,
 }: {
     session: DialogueSessionSummary;
     scene: DialogueScene;
     script: DialogueScript | null;
+    /** 最近的会话，渲染在页面底部。 */
+    history: DialogueSessionSummary[];
     onFinished: (session: DialogueSessionSummary, review: DialogueReview) => void;
     onSpeak: (text: string) => void;
     onBack: () => void;
+    /** 打开某条历史会话复盘。 */
+    onOpenHistory: (sessionId: number) => void;
 }) {
     const { t } = useTranslation('pages');
     const lines = useMemo(() => script?.lines ?? [], [script]);
@@ -126,6 +155,9 @@ export default function DialogueSessionView({
     const [difficulty, setDifficulty] = useState<DialogueDifficulty>(session.difficulty);
     /** 最近一次发言的评测结果，显示在右栏。 */
     const [score, setScore] = useState<RetellResult | null>(null);
+    /** 本轮所有语音发言的评测结果，用于批量提取生词。 */
+    const [turnScores, setTurnScores] = useState<RetellResult[]>([]);
+    const [savingBatch, setSavingBatch] = useState(false);
     const [scoring, setScoring] = useState(false);
     const [savingWords, setSavingWords] = useState(false);
     const bottomRef = useRef<HTMLDivElement | null>(null);
@@ -171,7 +203,13 @@ export default function DialogueSessionView({
         }
         const timer = setTimeout(() => {
             const id = `ai-${cursor}`;
-            setItems((previous) => [...previous, { id, role: 'assistant', text: line.en, hintZh: line.zh }]);
+            setItems((previous) => [...previous, {
+                id,
+                role: 'assistant',
+                speaker: line.speaker,
+                text: line.en,
+                hintZh: line.zh,
+            }]);
             setSpeechPending(true);
             const spoken = enqueueSpeech(line.en);
             void spoken.then(() => {
@@ -221,6 +259,7 @@ export default function DialogueSessionView({
             });
             if (mountedRef.current) {
                 setScore(result);
+                setTurnScores((previous) => [...previous, result]);
             }
         } catch (error) {
             logger.error('对话发音评测失败', { error });
@@ -254,6 +293,7 @@ export default function DialogueSessionView({
         setItems((previous) => [...previous, {
             id: `user-${userIndex}`,
             role: 'user',
+            speaker: learnerRole,
             text,
             userIndex,
             correction: null,
@@ -343,6 +383,50 @@ export default function DialogueSessionView({
         }
     };
 
+    /**
+     * 批量提取本轮生词：汇总每轮评测里的错词与模型生词，写进词汇工坊，
+     * 同时逐条加入间隔复习队列。
+     */
+    const handleBatchWords = async (): Promise<void> => {
+        const words = new Set<string>();
+        for (const turn of turnScores) {
+            for (const item of turn.words) {
+                if (item.status !== 'correct') {
+                    const text = (item.expected ?? item.actual ?? '').trim();
+                    if (text) {
+                        words.add(text);
+                    }
+                }
+            }
+            for (const word of turn.vocab) {
+                if (word.trim()) {
+                    words.add(word.trim());
+                }
+            }
+        }
+        if (words.size === 0) {
+            toast.success(t('practice.noProblemWords'));
+            return;
+        }
+        setSavingBatch(true);
+        let added = 0;
+        try {
+            for (const word of words) {
+                const response = await videoLearningApi.favoriteWord(word);
+                if (response.success) {
+                    added += 1;
+                }
+                await srsApi.addCard({ referenceText: word, source: { kind: 'free' } });
+            }
+            toast.success(t('dialogue.batchWordsDone', { count: added }));
+        } catch (error) {
+            logger.error('批量提取生词失败', { error });
+            toast.error(error instanceof Error ? error.message : t('practice.wordsAddFailed'));
+        } finally {
+            setSavingBatch(false);
+        }
+    };
+
     /** 重置对话：清空本地演出记录，从起点重演（不影响已落库的历史）。 */
     const handleReset = (): void => {
         setItems([]);
@@ -385,26 +469,6 @@ export default function DialogueSessionView({
                             <option key={item} value={item}>{t(`${DIFFICULTY_LABEL}.${item}`)}</option>
                         ))}
                     </select>
-                    <Button
-                        type="button"
-                        size="sm"
-                        variant="outline"
-                        className="h-8 rounded-full px-3 text-xs"
-                        onClick={handleReset}
-                    >
-                        <RotateCcw className="mr-1 h-3.5 w-3.5" />
-                        {t('dialogue.resetChat')}
-                    </Button>
-                    <Button
-                        type="button"
-                        size="sm"
-                        variant="outline"
-                        className="h-8 rounded-full px-3 text-xs"
-                        onClick={onBack}
-                    >
-                        <ArrowLeft className="mr-1 h-3.5 w-3.5" />
-                        {t('dialogue.backToList')}
-                    </Button>
                 </div>
             </div>
 
@@ -418,7 +482,34 @@ export default function DialogueSessionView({
                         </span>
                     </div>
 
-                    <SceneCardView scene={scene} onSpeak={onSpeak} />
+                    <SceneCardView
+                        scene={scene}
+                        onSpeak={onSpeak}
+                        actions={(
+                            <>
+                                <Button
+                                    type="button"
+                                    size="sm"
+                                    variant="outline"
+                                    className="h-7 rounded-full px-2.5 text-xs"
+                                    onClick={handleReset}
+                                >
+                                    <RotateCcw className="mr-1 h-3 w-3" />
+                                    {t('dialogue.resetChat')}
+                                </Button>
+                                <Button
+                                    type="button"
+                                    size="sm"
+                                    variant="outline"
+                                    className="h-7 rounded-full px-2.5 text-xs"
+                                    onClick={onBack}
+                                >
+                                    <ArrowLeft className="mr-1 h-3 w-3" />
+                                    {t('dialogue.backToList')}
+                                </Button>
+                            </>
+                        )}
+                    />
 
                     <div className="flex flex-col gap-3">
                         {items.map((item) => (
@@ -439,13 +530,21 @@ export default function DialogueSessionView({
                                 <div className="flex max-w-[80%] flex-col">
                                     <div
                                         className={cn(
+                                            'text-[11px]',
+                                            item.role === 'user' ? 'text-right text-muted-foreground' : 'text-muted-foreground',
+                                        )}
+                                    >
+                                        {dialogueSpeakerLabel(item.speaker, item.role, script)}
+                                    </div>
+                                    <div
+                                        className={cn(
                                             'select-text whitespace-pre-wrap rounded-2xl px-3.5 py-2.5 text-sm leading-6',
                                             item.role === 'user'
                                                 ? 'rounded-tr-sm bg-primary text-primary-foreground'
                                                 : 'rounded-tl-sm bg-sky-500/15 text-foreground',
                                         )}
                                     >
-                                        {item.role === 'assistant' ? `${t('dialogue.aiLabel')}: ${item.text}` : item.text}
+                                        {item.text}
                                     </div>
                                     {item.hintZh && (
                                         <div className="mt-1 text-xs leading-5 text-muted-foreground">{item.hintZh}</div>
@@ -454,6 +553,7 @@ export default function DialogueSessionView({
                                         <CorrectionCard
                                             correction={item.correction ?? null}
                                             pending={correctingUserIndex === item.userIndex}
+                                            spokenText={item.text}
                                         />
                                     )}
                                 </div>
@@ -498,7 +598,20 @@ export default function DialogueSessionView({
                         )}
                     </div>
 
-                    <div className="flex justify-end">
+                    <div className="flex flex-wrap items-center justify-end gap-2">
+                        <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            className="h-9 rounded-xl px-4 text-sm"
+                            disabled={turnScores.length === 0 || savingBatch}
+                            onClick={() => void handleBatchWords()}
+                        >
+                            {savingBatch
+                                ? <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
+                                : <BookOpen className="mr-1 h-3.5 w-3.5" />}
+                            {t('dialogue.batchWords')}
+                        </Button>
                         <Button
                             type="button"
                             size="sm"
@@ -531,6 +644,10 @@ export default function DialogueSessionView({
                     }}
                 />
             </div>
+
+            {/* 底部：最近对话 */}
+            <HistoryList sessions={history} onOpen={onOpenHistory} />
+
             <div ref={bottomRef} />
         </div>
     );
