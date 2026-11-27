@@ -38,8 +38,8 @@ import SpeechScorePanel from './components/SpeechScorePanel';
 
 const logger = getRendererLogger('DialoguePage');
 
-/** 历史列表条数。 */
-const HISTORY_LIMIT = 10;
+/** 最近对话保留条数；页面上只有这一份列表。 */
+const HISTORY_LIMIT = 6;
 
 /** 整部视频的台词上限：超长字幕文件不整段搬运，避免 IPC 与界面过载。 */
 const MAX_SCRIPT_LINES = 2000;
@@ -453,7 +453,7 @@ export default function DialoguePage() {
                     session={active.session}
                     scene={active.scene}
                     script={active.script}
-                    history={history}
+                    scenes={history}
                     onFinished={(session, result) => {
                         void handleFinished(session, result);
                     }}

@@ -21,7 +21,6 @@ import { getRendererLogger } from '@/fronted/log/simple-logger';
 import { cn } from '@/fronted/lib/utils';
 import { dialogueApi } from '../dialogueApi';
 import DialogueComposer from './DialogueComposer';
-import HistoryList from './HistoryList';
 import SceneCardView from './SceneCardView';
 import TurnEvaluationPanel from './TurnEvaluationPanel';
 
@@ -48,7 +47,7 @@ const DIFFICULTY_LABEL = 'dialogue.difficulty';
 export default function DialogueSessionView({
     session,
     scene,
-    history,
+    scenes,
     onFinished,
     onSpeak,
     onBack,
@@ -57,12 +56,12 @@ export default function DialogueSessionView({
     session: DialogueSessionSummary;
     scene: DialogueScene;
     script: DialogueScript | null;
-    /** 最近的会话，渲染在页面底部。 */
-    history: DialogueSessionSummary[];
+    /** 最近对话的场景，供工具栏切换；当前会话也在里面。 */
+    scenes: DialogueSessionSummary[];
     onFinished: (session: DialogueSessionSummary, review: DialogueReview) => void;
     onSpeak: (text: string) => void;
     onBack: () => void;
-    /** 打开某条历史会话复盘。 */
+    /** 打开某条历史会话。 */
     onOpenHistory: (sessionId: number) => void;
 }) {
     const { t } = useTranslation('pages');
@@ -316,9 +315,29 @@ export default function DialogueSessionView({
             {/* 顶部工具栏 */}
             <div className="flex flex-wrap items-center gap-2">
                 <div className="ml-auto flex flex-wrap items-center gap-2">
-                    <label className="flex items-center gap-1.5 rounded-full border border-border/60 bg-card px-3 py-1.5 text-xs text-muted-foreground">
+                    <label className="flex items-center gap-1.5 rounded-full border border-border/60 bg-card pl-3 pr-1 py-1 text-xs text-muted-foreground">
                         {t('dialogue.sceneLabel')}
-                        <span className="max-w-40 truncate text-foreground">{session.title || scene.title}</span>
+                        <select
+                            value={session.id}
+                            onChange={(event) => {
+                                const nextId = Number(event.target.value);
+                                if (nextId !== session.id) {
+                                    onOpenHistory(nextId);
+                                }
+                            }}
+                            className="max-w-52 truncate rounded-full bg-transparent py-1 pr-2 text-xs text-foreground outline-none"
+                        >
+                            <option value={session.id}>
+                                {session.title || scene.title} · {session.anchorText.slice(0, 24)}
+                            </option>
+                            {scenes
+                                .filter((item) => item.id !== session.id)
+                                .map((item) => (
+                                    <option key={item.id} value={item.id}>
+                                        {item.title} · {item.anchorText.slice(0, 24)}
+                                    </option>
+                                ))}
+                        </select>
                     </label>
                     <select
                         value={difficulty}
@@ -374,7 +393,7 @@ export default function DialogueSessionView({
 
                     <div
                         ref={bubbleListRef}
-                        className="flex max-h-[46vh] min-h-40 flex-col gap-3 overflow-y-auto pr-1"
+                        className="flex h-[13.5rem] flex-col gap-3 overflow-y-auto pr-1"
                     >
                         {loading && (
                             <div className="flex items-center justify-center gap-2 py-6 text-xs text-muted-foreground">
@@ -494,9 +513,6 @@ export default function DialogueSessionView({
                     }}
                 />
             </div>
-
-            {/* 底部：最近对话 */}
-            <HistoryList sessions={history} onOpen={onOpenHistory} />
         </div>
     );
 }
