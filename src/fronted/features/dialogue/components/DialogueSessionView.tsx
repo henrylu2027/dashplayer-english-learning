@@ -341,9 +341,10 @@ export default function DialogueSessionView({
     return (
         <div className="flex flex-col gap-4">
             {/* 顶部工具栏 */}
-            <div className="flex flex-wrap items-center gap-2">
+            {/* 工具栏贴在滚动区顶部：内容滚动时下拉框不会被页面标题盖住，始终可点 */}
+            <div className="sticky top-0 z-20 -mx-1 flex flex-wrap items-center gap-2 rounded-xl bg-background/95 px-1 py-1 backdrop-blur">
                 <div className="ml-auto flex flex-wrap items-center gap-2">
-                    <label className="flex items-center gap-1.5 rounded-full border border-border/60 bg-card pl-3 pr-1 py-1 text-xs text-muted-foreground">
+                    <div className="flex items-center gap-1.5 rounded-full border border-border/60 bg-card pl-3 pr-1 py-1 text-xs text-muted-foreground">
                         {t('dialogue.sceneLabel')}
                         <select
                             value={session.id}
@@ -366,7 +367,7 @@ export default function DialogueSessionView({
                                     </option>
                                 ))}
                         </select>
-                    </label>
+                    </div>
                     <select
                         value={difficulty}
                         onChange={(event) => setDifficulty(event.target.value as DialogueDifficulty)}
