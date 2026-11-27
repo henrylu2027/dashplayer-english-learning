@@ -94,6 +94,13 @@ export const buildLessonScenePrompt = (params: {
             : '5. 禁止生成无关支线，禁止改变人物关系，禁止新增视频中不存在的人物、事件和物品；',
         '6. 对话必须自然、简短、口语化，适合美式口语练习。',
         '',
+        '句式配比约束：',
+        '- AI 陪练 B 禁止连续使用问句，问句占 B 所有回复的比例不超过 30%；',
+        '- 回复结构优先：简短评价/陈述句承接 + 可选追加温和提问；',
+        '- 禁止单一审问式问句，避免对话变成问答盘问；',
+        '- 优先使用本课指定的目标语法、核心词汇组织台词；',
+        '- 如果学习者使用了非本课目标时态，AI 陪练正常承接对话，时态纠正放在右侧评测提示，不要靠连续提问来引导。',
+        '',
         '输出要求：',
         '- characters 中说明：A 是学习者，B 是 AI 陪练（用中文描述角色身份）。',
         '- 台词里不要用「A」「B」当称呼或人名，双方只由 speaker 字段区分；需要称呼时用角色身份（如 sir、honey、老师）。',
@@ -155,13 +162,18 @@ export const buildDialogueTurnSystemPrompt = (params: {
         `所有对话必须严格忠于场景描述原文：场景名称「${params.scene.title}」，场景背景「${params.scene.settingZh}」；你扮演${params.scene.aiRole}（说话人B），用户固定扮演${params.scene.userRole}（说话人A）。`,
         '不允许自行修改、推翻、脑补场景里的物品、地点、前提。场景给定的前提条件全程生效，每一轮回复前先核对场景背景，禁止私自篡改剧情设定。',
         '2.【对话推进规则（次高优先级）】',
-        '你是说话人B，负责推动场景剧情持续进行，绝对不允许只输出一句陈述句、单纯应答就结束。',
-        '无论用户说什么，你的回复结构固定为：贴合场景的简短回应 + 紧跟一个和本场景主线相关的问句，用来把对话接力给用户。',
-        '禁止单独输出 Got it / Okay / Oh, okay / I see / Alright / Sure 这类无后续提问的收尾短句。',
-        '- 当用户向你提问时：先贴合场景回答，紧接着追加1个和本场景主线相关的新问题；',
-        '- 当用户是陈述语句：先给出贴合角色的回应，再抛出相关新问题，继续推进剧情；',
+        '你是说话人B，负责推动场景剧情。回复优先用陈述句或简短评价承接 A 刚说的内容，可以顺手补一句自己的信息、感受或打算；需要推进话题时，再追加一个温和的提问。',
+        '句式配比约束：',
+        '- 问句占你全部回复的比例不超过 30%；',
+        '- 禁止连续两句都是问句；上一轮你已经问过问题，这一轮必须用陈述句承接；',
+        '- 禁止审问式的一问接一问，避免把对话变成问答盘问。',
+        '- 禁止单独输出 Got it / Okay / Oh, okay / I see / Alright / Sure 这类没有内容、没有承接的收尾短句。',
+        '- 当 A 向你提问时：先贴合场景回答，可以不追问；',
+        '- 当 A 是陈述语句时：先承接或评价，再决定要不要温和追问；',
+        '- A 用了非本课目标的时态或语法：正常承接对话，不在这里纠错，时态与语法纠正写进评测的 error_list / comment。',
+        '优先用本课指定的目标语法、核心词汇组织台词。',
         '3. 话题约束：所有台词必须围绕当前场景主线，不能脱离场景主题乱聊无关话题；用户跑偏时温和拉回主线，不跟着跑题。不要主动开启场景之外的新支线，剧情走向围绕原有设定推进。',
-        '4. 一轮对话只输出一组（回应+问句），整体是一句美式短句，禁止一次性输出两句及以上长句。',
+        '4. 一轮只输出一句美式短句（陈述承接为主，问句为辅），禁止一次性输出两句及以上长句。',
         `5. 交际逻辑约束：必须准确理解英文问答、交际逻辑，区分道谢和答谢用语：`,
         '- 如果用户要求你说 thank you，你需要说出 thank you，禁止直接回复 you\'re welcome；',
         '- 只有用户主动向你说 thank you，你才可以使用 you\'re welcome 这类答谢回复；',
@@ -183,7 +195,7 @@ export const buildDialogueTurnSystemPrompt = (params: {
         '',
         '【输出格式】严格输出JSON，只返回json，不要额外解释文字',
         '{',
-        '  "ai_reply": "你的角色台词（美式短句，回应+问句）",',
+        '  "ai_reply": "你的角色台词（美式短句，以陈述承接为主，问句占比≤30%）",',
         '  "overall": 0,',
         '  "pronunciation": null,',
         '  "grammar": 0,',
@@ -226,17 +238,29 @@ export const buildDialogueTurnPrompt = (params: {
     history: DialogueTurnVO[];
     /** 学习者本轮说的话。 */
     userText: string;
-}): string => [
-    params.systemPrompt,
-    '',
-    '# 到目前为止的完整对话（按时间顺序）',
-    formatDialogueHistory(params.history),
-    '',
-    '# 本轮学习者说的话',
-    params.userText,
-    '',
-    '请只输出那一个 JSON 对象。',
-].join('\n');
+}): string => {
+    const aiTurns = params.history.filter((turn) => turn.role === 'assistant');
+    const questionTurns = aiTurns.filter((turn) => turn.content.includes('?')).length;
+    const lastAi = aiTurns.at(-1);
+    const ratio = aiTurns.length === 0 ? 0 : Math.round((questionTurns / aiTurns.length) * 100);
+    return [
+        params.systemPrompt,
+        '',
+        '# 本轮句式提醒',
+        `你已经回复 ${aiTurns.length} 句，其中问句 ${questionTurns} 句（${ratio}%），上限 30%。`,
+        lastAi && lastAi.content.includes('?')
+            ? '上一轮你已经问过问题：这一轮必须用陈述句承接，不要再问。'
+            : '这一轮可以用陈述句承接，也可以顺带一个温和的问题。',
+        '',
+        '# 到目前为止的完整对话（按时间顺序）',
+        formatDialogueHistory(params.history),
+        '',
+        '# 本轮学习者说的话',
+        params.userText,
+        '',
+        '请只输出那一个 JSON 对象。',
+    ].join('\n');
+};
 
 /**
  * 构建逐句纠错提示词。

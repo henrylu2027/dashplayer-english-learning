@@ -602,13 +602,21 @@ export class DialogueServiceImpl implements DialogueService {
             backend: record.session.backend,
         });
         let reply = this.sanitizeReply(draft.ai_reply);
-        // 缺了追问就等于把对话聊死：带着纠正提示重来一次，仍缺就照原样展示
-        if (!reply.includes('?')) {
-            this.logger.info('dialogue reply missing follow-up question', { sessionId: request.sessionId });
+        // 句式配比：上一轮已经是问句，或问句占比已超 30% 时，这一轮必须是陈述句
+        const aiTurns = turns.filter((turn) => turn.role === 'assistant');
+        const questionTurns = aiTurns.filter((turn) => turn.content.includes('?')).length;
+        const lastWasQuestion = aiTurns.at(-1)?.content.includes('?') ?? false;
+        const ratioTooHigh = aiTurns.length >= 3 && questionTurns / aiTurns.length > 0.3;
+        if (reply.includes('?') && (lastWasQuestion || ratioTooHigh)) {
+            this.logger.info('dialogue reply should be a statement', {
+                sessionId: request.sessionId,
+                lastWasQuestion,
+                ratioTooHigh,
+            });
             draft = await this.generateTurnReply({
                 systemPrompt,
                 history: turns,
-                userText: `${text}\n\n（上一次回复只做了回应、没有追问。请重写：先贴合场景简短回应，再紧跟一个和主线相关的问题，把对话交回用户；整体一句美式短句。）`,
+                userText: `${text}\n\n（这一轮不要提问：上一轮已经问过，或问句占比超了上限。请用一句陈述句或简短评价承接学习者的话，可以补一点自己的信息或打算。）`,
                 backend: record.session.backend,
             });
             reply = this.sanitizeReply(draft.ai_reply);
@@ -803,7 +811,10 @@ export class DialogueServiceImpl implements DialogueService {
             aiRole: draft.characters.b.trim(),
             userRole: draft.characters.a.trim(),
             targetExpressions: targets.slice(0, 5).map((en) => ({ en, zh: '' })),
-            openingLineEn: DialogueServiceImpl.stripRoleAddress(opening.en),
+            // 开场白只留第一句，避免模型给一整段
+            openingLineEn: DialogueServiceImpl.stripRoleAddress(
+                opening.en.split(/(?<=[.!?])\s+/).find((part) => part.trim().length > 0) ?? opening.en,
+            ),
             openingHintZh: firstLearnerLine?.practice_focus?.trim()
                 || (firstLearnerLine ? `试着回应：${firstLearnerLine.en}` : '轮到你了，试着回应一句。'),
             practice: {
