@@ -31,23 +31,18 @@ const formatElapsed = (seconds: number): string => {
  *
  * @param props.disabled 生成期间禁用输入。
  * @param props.onSend 发送文本；来自录音且未改动时带上识别置信度低的词。
- * @param props.onStop 停止生成。
  */
 export default function DialogueComposer({
     disabled,
-    busy,
     onSend,
-    onStop,
 }: {
     disabled: boolean;
-    busy: boolean;
     onSend: (text: string, meta?: {
         lowConfidenceWords: string[];
         /** 来自录音时带上原始音频，供发音评测使用；打字输入没有。 */
         audio?: Uint8Array;
         mimeType?: string;
     }) => void;
-    onStop: () => void;
 }) {
     const { t } = useTranslation('pages');
     const [input, setInput] = useState('');
@@ -113,7 +108,7 @@ export default function DialogueComposer({
     };
 
     const handleMicClick = (): void => {
-        if (inputBlocked || busy) {
+        if (inputBlocked) {
             return;
         }
         if (isRecording) {
@@ -130,14 +125,14 @@ export default function DialogueComposer({
                 <button
                     type="button"
                     onClick={handleMicClick}
-                    disabled={inputBlocked || busy}
+                    disabled={inputBlocked}
                     aria-label={isRecording ? t('dialogue.stopRecording') : t('dialogue.startRecording')}
                     className={cn(
                         'flex h-10 w-10 shrink-0 items-center justify-center rounded-full transition-colors',
                         isRecording
                             ? 'bg-red-500 text-white shadow-md shadow-red-500/30'
                             : 'bg-muted text-foreground hover:bg-muted/70',
-                        (inputBlocked || busy) && 'cursor-wait opacity-60',
+                        inputBlocked && 'cursor-wait opacity-60',
                     )}
                 >
                     {processing
@@ -158,35 +153,22 @@ export default function DialogueComposer({
                             }
                         }}
                         rows={2}
-                        disabled={inputBlocked || busy}
+                        disabled={inputBlocked}
                         placeholder={t('dialogue.chatPlaceholder')}
                         className="w-full resize-none rounded-xl border border-border/60 bg-background px-3 py-2 text-sm leading-6 text-foreground outline-none placeholder:text-muted-foreground focus:border-ring/60 disabled:opacity-60"
                     />
                 </div>
 
-                {busy ? (
-                    <Button
-                        type="button"
-                        size="sm"
-                        variant="outline"
-                        className="h-10 shrink-0 rounded-xl px-3"
-                        onClick={onStop}
-                    >
-                        <Square className="mr-1 h-3.5 w-3.5 fill-current" />
-                        {t('dialogue.stopGenerating')}
-                    </Button>
-                ) : (
-                    <Button
-                        type="button"
-                        size="sm"
-                        className="h-10 shrink-0 rounded-xl px-3"
-                        disabled={disabled || input.trim().length === 0}
-                        onClick={submit}
-                    >
-                        <Send className="mr-1 h-3.5 w-3.5" />
-                        {t('dialogue.send')}
-                    </Button>
-                )}
+                <Button
+                    type="button"
+                    size="sm"
+                    className="h-10 shrink-0 rounded-xl px-3"
+                    disabled={disabled || input.trim().length === 0}
+                    onClick={submit}
+                >
+                    {disabled ? <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" /> : <Send className="mr-1 h-3.5 w-3.5" />}
+                    {t('dialogue.send')}
+                </Button>
             </div>
 
             <div className="flex min-h-4 items-center gap-2 text-xs text-muted-foreground">

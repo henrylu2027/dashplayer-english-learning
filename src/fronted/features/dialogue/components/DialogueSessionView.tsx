@@ -7,7 +7,6 @@ import type {
     DialogueDifficulty,
     DialogueReview,
     DialogueScene,
-    DialogueScript,
     DialogueSessionSummary,
     DialogueTurnEvaluation,
     DialogueTurnHint,
@@ -17,6 +16,7 @@ import { DIALOGUE_DIFFICULTIES } from '@/common/contracts/dialogue';
 import { Button } from '@/fronted/components/ui/button';
 import { srsApi } from '@/fronted/features/srs/srsApi';
 import { videoLearningApi } from '@/fronted/features/video-learning/videoLearningApi';
+import { getTtsUrl, playAudioUrlAndWait } from '@/fronted/infrastructure/audio/AudioPlayer';
 import { getRendererLogger } from '@/fronted/log/simple-logger';
 import { cn } from '@/fronted/lib/utils';
 import { dialogueApi } from '../dialogueApi';
@@ -37,10 +37,8 @@ const DIFFICULTY_LABEL = 'dialogue.difficulty';
  *
  * @param props.session 会话摘要。
  * @param props.scene 场景卡。
- * @param props.script 原片剧本；只作为语境提示，不再驱动对话。
- * @param props.history 最近的会话，渲染在页面底部。
+ * @param props.scenes 最近对话的场景，供工具栏切换；当前会话也在里面。
  * @param props.onFinished 复盘完成回调。
- * @param props.onSpeak 朗读回调。
  * @param props.onBack 返回会话列表。
  * @param props.onOpenHistory 打开某条历史会话。
  */
@@ -49,17 +47,14 @@ export default function DialogueSessionView({
     scene,
     scenes,
     onFinished,
-    onSpeak,
     onBack,
     onOpenHistory,
 }: {
     session: DialogueSessionSummary;
     scene: DialogueScene;
-    script: DialogueScript | null;
     /** 最近对话的场景，供工具栏切换；当前会话也在里面。 */
     scenes: DialogueSessionSummary[];
     onFinished: (session: DialogueSessionSummary, review: DialogueReview) => void;
-    onSpeak: (text: string) => void;
     onBack: () => void;
     /** 打开某条历史会话。 */
     onOpenHistory: (sessionId: number) => void;
@@ -84,10 +79,32 @@ export default function DialogueSessionView({
     const bubbleListRef = useRef<HTMLDivElement | null>(null);
     /** 已经自动入库的词，避免同一个词反复写库。 */
     const savedWordsRef = useRef<Set<string>>(new Set());
+    /** 朗读队列：说话人 A 读完才轮到 AI，避免两个声音叠在一起。 */
+    const speechQueueRef = useRef<Promise<void>>(Promise.resolve());
     const mountedRef = useRef(true);
 
     useEffect(() => () => {
         mountedRef.current = false;
+    }, []);
+
+    /**
+     * 把一句台词排进朗读队列；前一句读完才会开口。
+     * @param text 要朗读的英文。
+     * @returns 这句读完（或失败）后 resolve 的 promise。
+     */
+    const speak = useCallback((text: string): Promise<void> => {
+        if (!text.trim()) {
+            return Promise.resolve();
+        }
+        speechQueueRef.current = speechQueueRef.current
+            .then(async () => {
+                const url = await getTtsUrl(text);
+                await playAudioUrlAndWait(url);
+            })
+            .catch((error) => {
+                logger.warn('朗读失败', { error });
+            });
+        return speechQueueRef.current;
     }, []);
 
     /** 读取已落库的回合；刚创建时只有开场白。 */
@@ -174,6 +191,8 @@ export default function DialogueSessionView({
             return;
         }
         setSending(true);
+        // 说话人 A（学习者）先出声；AI 的台词排在队列后面，等这句读完才开口
+        void speak(text);
         try {
             const result = await dialogueApi.replyTurn({
                 sessionId: session.id,
@@ -204,7 +223,7 @@ export default function DialogueSessionView({
                     toast.success(t('dialogue.vocabAutoSaved', { count: added }));
                 }
             }
-            onSpeak(result.assistantTurn.content);
+            void speak(result.assistantTurn.content);
         } catch (error) {
             logger.error('对话回复失败', { error, sessionId: session.id });
             toast.error(error instanceof Error ? error.message : t('dialogue.turnFailed'));
@@ -363,7 +382,7 @@ export default function DialogueSessionView({
 
                     <SceneCardView
                         scene={scene}
-                        onSpeak={onSpeak}
+                        onSpeak={speak}
                         hint={hint}
                         actions={(
                             <>
@@ -409,7 +428,7 @@ export default function DialogueSessionView({
                                 {turn.role === 'assistant' && (
                                     <button
                                         type="button"
-                                        onClick={() => onSpeak(turn.content)}
+                                        onClick={() => void speak(turn.content)}
                                         aria-label={t('dialogue.speak')}
                                         className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground transition-colors hover:text-foreground"
                                     >
@@ -441,7 +460,7 @@ export default function DialogueSessionView({
                                 {turn.role === 'user' && (
                                     <button
                                         type="button"
-                                        onClick={() => onSpeak(turn.content)}
+                                        onClick={() => void speak(turn.content)}
                                         aria-label={t('dialogue.speak')}
                                         className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground transition-colors hover:text-foreground"
                                     >
@@ -460,9 +479,7 @@ export default function DialogueSessionView({
 
                     <div className="border-t border-border/50 pt-4">
                         <DialogueComposer
-                            disabled={finishing || loading}
-                            busy={sending}
-                            onStop={() => undefined}
+                            disabled={finishing || loading || sending}
                             onSend={(text, meta) => {
                                 void handleSend(text, meta);
                             }}
