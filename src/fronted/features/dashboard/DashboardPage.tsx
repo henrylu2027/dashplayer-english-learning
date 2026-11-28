@@ -1,11 +1,39 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
-import { ArrowRight, CheckCircle2, Circle, Flame, Loader2, MessagesSquare, Mic, PencilLine, RefreshCw, Repeat } from 'lucide-react';
+import {
+    ArrowRight,
+    AudioLines,
+    BookOpen,
+    Captions,
+    CheckCircle2,
+    Circle,
+    Flame,
+    Loader2,
+    MessagesSquare,
+    Mic,
+    PencilLine,
+    Play,
+    RefreshCw,
+    Repeat,
+    Rotate3D,
+    Settings,
+    SquareSplitHorizontal,
+    Star,
+    Video,
+    Volume2,
+} from 'lucide-react';
+import type { LucideIcon } from 'lucide-react';
 
 import type { DashboardSummary } from '@/common/contracts/dashboard';
+import type WatchHistoryVO from '@/common/types/WatchHistoryVO';
 import PageHeader from '@/fronted/components/shared/common/PageHeader';
 import { Button } from '@/fronted/components/ui/button';
+import { fileBrowserApi } from '@/fronted/features/file-browser/fileBrowserApi';
+import { favouriteApi } from '@/fronted/features/favourite/favouriteApi';
+import { dubbingApi } from '@/fronted/features/player/dubbing/dubbingApi';
+import { repairApi } from '@/fronted/features/repair/repairApi';
+import { videoLearningApi } from '@/fronted/features/video-learning/videoLearningApi';
 import { getRendererLogger } from '@/fronted/log/simple-logger';
 import { cn } from '@/fronted/lib/utils';
 import { dashboardApi } from './dashboardApi';
@@ -18,6 +46,20 @@ const logger = getRendererLogger('DashboardPage');
  */
 function weekdayLabel(date: string): string {
     return new Date(`${date}T00:00:00`).toLocaleDateString(undefined, { weekday: 'short' });
+}
+
+/** 把秒数格式化成 mm:ss（超过一小时带小时位）。 */
+function formatClock(seconds: number): string {
+    if (!Number.isFinite(seconds) || seconds <= 0) {
+        return '00:00';
+    }
+    const total = Math.floor(seconds);
+    const hours = Math.floor(total / 3600);
+    const minutes = Math.floor((total % 3600) / 60);
+    const rest = total % 60;
+    const mm = String(minutes).padStart(2, '0');
+    const ss = String(rest).padStart(2, '0');
+    return hours > 0 ? `${hours}:${mm}:${ss}` : `${minutes}:${ss}`;
 }
 
 /** 最近跟读记录里分数徽标的配色。 */
@@ -39,12 +81,57 @@ function scoreChipTone(score: number): string {
  */
 export default function DashboardPage() {
     const { t } = useTranslation('pages');
+    const { t: tn } = useTranslation('nav');
     const navigate = useNavigate();
 
     const [summary, setSummary] = useState<DashboardSummary | null>(null);
     const [loading, setLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
     const [error, setError] = useState<string | null>(null);
+    /** 最近观看，用于「继续上次观看」。 */
+    const [latestVideo, setLatestVideo] = useState<WatchHistoryVO | null>(null);
+    /** 各模块的数量摘要；取不到就留空，不阻塞学习台。 */
+    const [moduleCounts, setModuleCounts] = useState<{
+        vocabulary: number | null;
+        favorites: number | null;
+        dubbing: number | null;
+        repair: number | null;
+    }>({ vocabulary: null, favorites: null, dubbing: null, repair: null });
+
+    /** 读取最近观看与各模块的数量摘要；单项失败只留空，不影响学习台其它内容。 */
+    const loadModules = useCallback(async (): Promise<void> => {
+        const [history, vocabulary, favorites, dubbing, repair] = await Promise.allSettled([
+            fileBrowserApi.listBasicWatchHistory(),
+            videoLearningApi.getVocabulary(),
+            favouriteApi.search({
+                keyword: '',
+                keywordRange: 'clip',
+                tags: [],
+                tagsRelation: 'and',
+                date: { from: undefined, to: undefined },
+                includeNoTag: true,
+            }),
+            dubbingApi.listLibrary(),
+            repairApi.listGroups(),
+        ]);
+        if (history.status === 'fulfilled' && Array.isArray(history.value)) {
+            setLatestVideo(history.value.find((item) => !item.isFolder) ?? history.value[0] ?? null);
+        }
+        setModuleCounts({
+            vocabulary: vocabulary.status === 'fulfilled' && vocabulary.value.success && Array.isArray(vocabulary.value.data)
+                ? vocabulary.value.data.length
+                : null,
+            favorites: favorites.status === 'fulfilled' && Array.isArray(favorites.value)
+                ? favorites.value.length
+                : null,
+            dubbing: dubbing.status === 'fulfilled' && Array.isArray(dubbing.value)
+                ? dubbing.value.length
+                : null,
+            repair: repair.status === 'fulfilled' && Array.isArray(repair.value)
+                ? repair.value.length
+                : null,
+        });
+    }, []);
 
     const load = useCallback(async (mode: 'initial' | 'refresh'): Promise<void> => {
         if (mode === 'refresh') {
@@ -54,6 +141,7 @@ export default function DashboardPage() {
             const data = await dashboardApi.summary();
             setSummary(data);
             setError(null);
+            void loadModules();
         } catch (loadFailure) {
             logger.error('加载学习台失败', { error: loadFailure });
             setError(loadFailure instanceof Error ? loadFailure.message : t('dashboard.loadFailed'));
@@ -64,7 +152,7 @@ export default function DashboardPage() {
                 setRefreshing(false);
             }
         }
-    }, [t]);
+    }, [t, loadModules]);
 
     useEffect(() => {
         // 显式 await：dashboardApi.summary 是异步的，setState 发生在 await 之后，
@@ -89,6 +177,111 @@ export default function DashboardPage() {
     const shadowDone = summary ? summary.todayAttemptCount > 0 : false;
     const practiceDone = summary ? summary.todayPracticeCount > 0 : false;
     const dialogueDone = summary ? summary.todayDialogueTurnCount > 0 : false;
+    const progressPercent = latestVideo && latestVideo.duration > 0
+        ? Math.min(100, Math.max(0, Math.round((latestVideo.current_position / latestVideo.duration) * 100)))
+        : 0;
+
+    // 侧栏的每个模块在这里都有一条入口，学习类带今日进度，工具类带数量摘要
+    const moduleEntries: Array<{ key: string; name: string; hint: string; path: string; icon: LucideIcon }> = summary
+        ? [
+            {
+                key: 'player',
+                name: tn('playbackLab'),
+                hint: latestVideo
+                    ? t('dashboard.moduleContinue', { time: formatClock(latestVideo.current_position) })
+                    : t('dashboard.moduleOpenVideo'),
+                path: latestVideo ? `/player/${latestVideo.id}` : '/home',
+                icon: Video,
+            },
+            {
+                key: 'original',
+                name: tn('originalShadowing'),
+                hint: summary.todayAttemptCount > 0
+                    ? t('dashboard.moduleDone', { count: summary.todayAttemptCount })
+                    : t('dashboard.moduleOriginalIdle'),
+                path: '/original',
+                icon: Volume2,
+            },
+            {
+                key: 'practice',
+                name: tn('practice'),
+                hint: summary.todayPracticeCount > 0
+                    ? t('dashboard.moduleDone', { count: summary.todayPracticeCount })
+                    : t('dashboard.modulePracticeIdle'),
+                path: '/practice',
+                icon: PencilLine,
+            },
+            {
+                key: 'dialogue',
+                name: tn('dialogue'),
+                hint: summary.todayDialogueTurnCount > 0
+                    ? t('dashboard.moduleDone', { count: summary.todayDialogueTurnCount })
+                    : t('dashboard.moduleDialogueIdle'),
+                path: '/dialogue',
+                icon: MessagesSquare,
+            },
+            {
+                key: 'vocabulary',
+                name: tn('vocabularyStudio'),
+                hint: moduleCounts.vocabulary === null
+                    ? ''
+                    : moduleCounts.vocabulary === 0
+                        ? t('dashboard.moduleVocabularyEmpty')
+                        : t('dashboard.moduleVocabulary', { count: moduleCounts.vocabulary }),
+                path: '/vocabulary',
+                icon: BookOpen,
+            },
+            {
+                key: 'review',
+                name: tn('reviewPlan'),
+                hint: t('dashboard.moduleReview', { count: summary.dueReviewCount }),
+                path: '/review',
+                icon: Repeat,
+            },
+            {
+                key: 'favorite',
+                name: tn('savedMoments'),
+                hint: moduleCounts.favorites === null ? '' : t('dashboard.moduleFavorite', { count: moduleCounts.favorites }),
+                path: '/favorite',
+                icon: Star,
+            },
+            {
+                key: 'transcript',
+                name: tn('subtitleWorkspace'),
+                hint: t('dashboard.moduleTranscript'),
+                path: '/transcript',
+                icon: Captions,
+            },
+            {
+                key: 'dubbing',
+                name: tn('dubbingExport'),
+                hint: moduleCounts.dubbing === null ? '' : t('dashboard.moduleDubbing', { count: moduleCounts.dubbing }),
+                path: '/dubbing',
+                icon: AudioLines,
+            },
+            {
+                key: 'split',
+                name: tn('sentenceSplitter'),
+                hint: t('dashboard.moduleSplit'),
+                path: '/split',
+                icon: SquareSplitHorizontal,
+            },
+            {
+                key: 'repair',
+                name: tn('playbackRepair'),
+                hint: moduleCounts.repair === null ? '' : t('dashboard.moduleRepair', { count: moduleCounts.repair }),
+                path: '/repair',
+                icon: Rotate3D,
+            },
+            {
+                key: 'settings',
+                name: tn('settingsCenter'),
+                hint: t('dashboard.moduleSettings'),
+                path: '/settings',
+                icon: Settings,
+            },
+        ]
+        : [];
 
     return (
         <div className="w-full h-full flex flex-col overflow-hidden select-text bg-background text-foreground">
@@ -185,6 +378,39 @@ export default function DashboardPage() {
                                 </div>
                             </div>
 
+                            {latestVideo && (
+                                <section className="flex flex-wrap items-center gap-4 rounded-2xl border border-border/60 bg-card p-4 shadow-xs">
+                                    <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
+                                        <Video className="h-4 w-4" />
+                                    </div>
+                                    <div className="min-w-0 flex-1">
+                                        <div className="text-[11px] text-muted-foreground">{t('dashboard.continueWatching')}</div>
+                                        <div className="truncate text-sm text-foreground">
+                                            {latestVideo.displayFileName || latestVideo.fileName}
+                                        </div>
+                                        <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-muted">
+                                            <div
+                                                className="h-full rounded-full bg-primary transition-all"
+                                                style={{ width: `${progressPercent}%` }}
+                                            />
+                                        </div>
+                                        <div className="mt-1 text-xs tabular-nums text-muted-foreground">
+                                            {formatClock(latestVideo.current_position)} / {formatClock(latestVideo.duration)}
+                                        </div>
+                                    </div>
+                                    <Button
+                                        type="button"
+                                        size="sm"
+                                        variant="outline"
+                                        className="h-8 shrink-0 rounded-lg px-3 text-xs"
+                                        onClick={() => navigate(`/player/${latestVideo.id}`)}
+                                    >
+                                        <Play className="mr-1 h-3.5 w-3.5" />
+                                        {t('dashboard.resume')}
+                                    </Button>
+                                </section>
+                            )}
+
                             <div className="grid gap-4 lg:grid-cols-[minmax(0,1.15fr)_minmax(0,0.85fr)]">
                                 <section className="rounded-2xl border border-border/60 bg-card p-4 shadow-xs">
                                     <div className="flex items-baseline justify-between">
@@ -231,11 +457,11 @@ export default function DashboardPage() {
                                                 <Circle className="h-5 w-5 shrink-0 text-muted-foreground/50" />
                                             )}
                                             <div className="min-w-0 flex-1">
-                                                <div className="text-sm text-foreground">{t('dashboard.taskShadow')}</div>
+                                                <div className="text-sm text-foreground">{t('dashboard.taskOriginal')}</div>
                                                 <div className="mt-0.5 text-xs text-muted-foreground">
                                                     {shadowDone
                                                         ? t('dashboard.taskShadowDone', { times: summary.todayAttemptCount })
-                                                        : t('dashboard.taskShadowPending')}
+                                                        : t('dashboard.taskOriginalPending')}
                                                 </div>
                                             </div>
                                             {!shadowDone && (
@@ -244,7 +470,7 @@ export default function DashboardPage() {
                                                     size="sm"
                                                     variant="outline"
                                                     className="h-7 shrink-0 rounded-lg px-2.5 text-xs"
-                                                    onClick={() => navigate('/shadowing')}
+                                                    onClick={() => navigate('/original')}
                                                 >
                                                     <Mic className="mr-1 h-3.5 w-3.5" />
                                                     {t('dashboard.goShadowing')}
@@ -357,7 +583,7 @@ export default function DashboardPage() {
                                         size="sm"
                                         variant="ghost"
                                         className="h-7 rounded-lg px-2 text-xs"
-                                        onClick={() => navigate('/shadowing')}
+                                        onClick={() => navigate('/original')}
                                     >
                                         {t('dashboard.goShadowing')}
                                         <ArrowRight className="ml-1 h-3.5 w-3.5" />
@@ -397,6 +623,34 @@ export default function DashboardPage() {
                                         ))}
                                     </div>
                                 )}
+                            </section>
+
+                            <section className="rounded-2xl border border-border/60 bg-card p-4 shadow-xs">
+                                <h2 className="text-sm font-medium text-foreground">{t('dashboard.modulesTitle')}</h2>
+                                <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                                    {moduleEntries.map((entry) => {
+                                        const Icon = entry.icon;
+                                        return (
+                                            <button
+                                                key={entry.key}
+                                                type="button"
+                                                onClick={() => navigate(entry.path)}
+                                                className="group flex items-center gap-3 rounded-xl border border-border/60 bg-background px-3 py-2.5 text-left transition-colors hover:border-border hover:bg-muted/40"
+                                            >
+                                                <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground transition-colors group-hover:text-foreground">
+                                                    <Icon className="h-4 w-4" />
+                                                </span>
+                                                <span className="min-w-0 flex-1">
+                                                    <span className="block truncate text-sm text-foreground">{entry.name}</span>
+                                                    {entry.hint !== '' && (
+                                                        <span className="block truncate text-xs text-muted-foreground">{entry.hint}</span>
+                                                    )}
+                                                </span>
+                                                <ArrowRight className="h-4 w-4 shrink-0 text-muted-foreground/40 transition-colors group-hover:text-foreground" />
+                                            </button>
+                                        );
+                                    })}
+                                </div>
                             </section>
                         </>
                     )}
