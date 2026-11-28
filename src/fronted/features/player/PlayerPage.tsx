@@ -56,6 +56,15 @@ const PlayerWithControlsPage = () => {
     const [_searchParams, setSearchParams] = useSearchParams();
     // dev/qa 入口：`?file=` 直接把路径换成观看记录，跳过「入库 → 点进去」的前置（打包版忽略）
     const devEntry = useDevPlayerEntry(_searchParams);
+    // 复习页「回到原片」的目标位置（秒）；只认首次渲染的查询参数
+    const [srsSeekSeconds] = useState<number | null>(() => {
+        const raw = _searchParams.get('srsSeek');
+        if (raw === null) {
+            return null;
+        }
+        const value = Number(raw);
+        return Number.isFinite(value) && value >= 0 ? value : null;
+    });
     // 请求了 dev 入口就必须等它给出记录 ID，不能拿路由里的占位 ID 去查详情
     const effectiveVideoId = devEntry.requested ? devEntry.videoId : videoId;
     const {data: video} = useSWR(
@@ -306,6 +315,13 @@ const PlayerWithControlsPage = () => {
         }
         playerActions.seekTo({ time: devEntry.seekSeconds, play: false });
     }, [devEntry.seekSeconds, videoLoaded]);
+    // 复习页「回到原片」：`?srsSeek=<秒>` 只在首次渲染时读取，视频就绪后定位一次
+    useEffect(() => {
+        if (srsSeekSeconds === null || !videoLoaded) {
+            return;
+        }
+        playerActions.seekTo({ time: srsSeekSeconds, play: false });
+    }, [srsSeekSeconds, videoLoaded]);
     useEffect(() => {
         // 卡死提示 / 播放错误提示：媒体报错或看门狗判定卡死触发
         if (mediaErrorCode === null && playbackStallCount === 0) {

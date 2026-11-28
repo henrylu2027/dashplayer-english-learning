@@ -1,9 +1,14 @@
 import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { ChevronDown, ChevronUp, History } from 'lucide-react';
+import toast from 'react-hot-toast';
+import { ChevronDown, ChevronUp, History, Loader2 } from 'lucide-react';
 
-import type { SrsReviewForm, SrsVerdict } from '@/common/contracts/srs';
+import type { SrsHistoryItem, SrsReviewForm, SrsVerdict } from '@/common/contracts/srs';
+import { getRendererLogger } from '@/fronted/log/simple-logger';
 import { cn } from '@/fronted/lib/utils';
+import { srsApi } from '../srsApi';
+
+const logger = getRendererLogger('SrsArchive');
 
 /** 本次会话的一条复习记录。 */
 export interface ArchiveItem {
@@ -41,9 +46,9 @@ const VERDICT_LABEL: Record<SrsVerdict, string> = {
 };
 
 /**
- * 复习记录存档：本次会话的统计与明细。
+ * 复习记录存档：本次会话明细 + 历史日志。
  *
- * 历史日期回溯属于 P1，这里只保留当前会话，刷新页面即清空。
+ * 本次会话只保存在内存，刷新页面即清空；历史日志来自 `dp_srs_review_log`，按日期分组。
  */
 export interface SrsArchiveProps {
     /** 本次会话的判定记录，按时间正序。 */
@@ -53,6 +58,9 @@ export interface SrsArchiveProps {
 export default function SrsArchive({ items }: SrsArchiveProps) {
     const { t } = useTranslation('pages');
     const [open, setOpen] = useState(false);
+    const [tab, setTab] = useState<'session' | 'history'>('session');
+    const [history, setHistory] = useState<SrsHistoryItem[] | null>(null);
+    const [historyLoading, setHistoryLoading] = useState(false);
 
     const average = useMemo(() => {
         const scored = items.filter((item) => item.score !== null);
@@ -61,6 +69,42 @@ export default function SrsArchive({ items }: SrsArchiveProps) {
         }
         return Math.round(scored.reduce((sum, item) => sum + (item.score ?? 0), 0) / scored.length);
     }, [items]);
+
+    /** 按日期分组的历史记录，日期用本地时区。 */
+    const historyGroups = useMemo(() => {
+        const groups = new Map<string, SrsHistoryItem[]>();
+        (history ?? []).forEach((item) => {
+            const key = new Date(item.createdAt).toLocaleDateString('zh-CN');
+            const list = groups.get(key) ?? [];
+            list.push(item);
+            groups.set(key, list);
+        });
+        return [...groups.entries()];
+    }, [history]);
+
+    /** 首次切到历史时加载。 */
+    const loadHistory = async (): Promise<void> => {
+        if (history !== null || historyLoading) {
+            return;
+        }
+        setHistoryLoading(true);
+        try {
+            const result = await srsApi.history({ limit: 200 });
+            setHistory(result.items);
+        } catch (error) {
+            logger.error('加载复习历史失败', { error });
+            toast.error(error instanceof Error ? error.message : t('srs.loadFailed'));
+        } finally {
+            setHistoryLoading(false);
+        }
+    };
+
+    const switchTab = (next: 'session' | 'history'): void => {
+        setTab(next);
+        if (next === 'history') {
+            void loadHistory();
+        }
+    };
 
     return (
         <div className="shrink-0 border-t border-border/60 bg-card/60">
@@ -80,41 +124,90 @@ export default function SrsArchive({ items }: SrsArchiveProps) {
                 </span>
             </button>
             {open && (
-                <div className="max-h-48 overflow-y-auto px-6 pb-3">
-                    {items.length === 0 ? (
+                <div className="px-6 pb-3">
+                    <div className="mb-2 flex items-center gap-1.5">
+                        {(['session', 'history'] as const).map((value) => (
+                            <button
+                                key={value}
+                                type="button"
+                                onClick={() => switchTab(value)}
+                                className={cn(
+                                    'rounded-full border px-2.5 py-0.5 text-[11px] transition-colors',
+                                    tab === value
+                                        ? 'border-primary/40 bg-primary/10 text-primary'
+                                        : 'border-transparent text-muted-foreground hover:bg-muted',
+                                )}
+                            >
+                                {t(value === 'session' ? 'srs.archiveSession' : 'srs.archiveHistory')}
+                            </button>
+                        ))}
+                    </div>
+
+                    {tab === 'session' ? (
+                        <div className="max-h-48 overflow-y-auto">
+                            {items.length === 0 ? (
+                                <p className="py-2 text-xs text-muted-foreground">{t('srs.archiveEmpty')}</p>
+                            ) : (
+                                <div className="flex flex-col gap-1">
+                                    {[...items].reverse().map((item) => (
+                                        <div
+                                            key={`${item.cardId}-${item.at}`}
+                                            className="flex items-center gap-2 rounded-lg px-2 py-1 text-xs"
+                                        >
+                                            <span className="shrink-0 tabular-nums text-muted-foreground">
+                                                {new Date(item.at).toLocaleTimeString('zh-CN', { hour12: false })}
+                                            </span>
+                                            <FormChip form={item.form} />
+                                            <span className="min-w-0 flex-1 truncate text-foreground" title={item.text}>
+                                                {item.text}
+                                            </span>
+                                            {item.score !== null && (
+                                                <span className="shrink-0 tabular-nums text-muted-foreground">{item.score}</span>
+                                            )}
+                                            <VerdictLabel verdict={item.verdict} />
+                                            <span className="shrink-0 tabular-nums text-muted-foreground">
+                                                {item.mastered
+                                                    ? t('srs.statusMastered')
+                                                    : t('srs.verdictNext', { days: item.intervalDays })}
+                                            </span>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+                    ) : historyLoading ? (
+                        <div className="flex justify-center py-4 text-muted-foreground">
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                        </div>
+                    ) : historyGroups.length === 0 ? (
                         <p className="py-2 text-xs text-muted-foreground">{t('srs.archiveEmpty')}</p>
                     ) : (
-                        <div className="flex flex-col gap-1">
-                            {[...items].reverse().map((item) => (
-                                <div
-                                    key={`${item.cardId}-${item.at}`}
-                                    className="flex items-center gap-2 rounded-lg px-2 py-1 text-xs"
-                                >
-                                    <span className="shrink-0 tabular-nums text-muted-foreground">
-                                        {new Date(item.at).toLocaleTimeString('zh-CN', { hour12: false })}
-                                    </span>
-                                    <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-muted-foreground">
-                                        {t(FORM_LABEL[item.form])}
-                                    </span>
-                                    <span className="min-w-0 flex-1 truncate text-foreground" title={item.text}>
-                                        {item.text}
-                                    </span>
-                                    {item.score !== null && (
-                                        <span className="shrink-0 tabular-nums text-muted-foreground">{item.score}</span>
-                                    )}
-                                    <span
-                                        className={cn(
-                                            'shrink-0',
-                                            item.verdict === 'forgot' && 'text-red-500',
-                                            item.verdict === 'fuzzy' && 'text-amber-600 dark:text-amber-400',
-                                            item.verdict === 'known' && 'text-emerald-600 dark:text-emerald-400',
-                                        )}
-                                    >
-                                        {t(VERDICT_LABEL[item.verdict])}
-                                    </span>
-                                    <span className="shrink-0 tabular-nums text-muted-foreground">
-                                        {item.mastered ? t('srs.statusMastered') : t('srs.verdictNext', { days: item.intervalDays })}
-                                    </span>
+                        <div className="max-h-56 space-y-2 overflow-y-auto">
+                            {historyGroups.map(([day, list]) => (
+                                <div key={day}>
+                                    <div className="sticky top-0 bg-card/95 px-2 py-1 text-[11px] text-muted-foreground">
+                                        {day}
+                                    </div>
+                                    <div className="flex flex-col gap-1">
+                                        {list.map((item) => (
+                                            <div
+                                                key={item.id}
+                                                className="flex items-center gap-2 rounded-lg px-2 py-1 text-xs"
+                                            >
+                                                <span className="shrink-0 tabular-nums text-muted-foreground">
+                                                    {new Date(item.createdAt).toLocaleTimeString('zh-CN', { hour12: false })}
+                                                </span>
+                                                <FormChip form={item.form} />
+                                                <span className="min-w-0 flex-1 truncate text-foreground" title={item.text}>
+                                                    {item.text}
+                                                </span>
+                                                {item.score !== null && (
+                                                    <span className="shrink-0 tabular-nums text-muted-foreground">{item.score}</span>
+                                                )}
+                                                <VerdictLabel verdict={item.verdict} />
+                                            </div>
+                                        ))}
+                                    </div>
                                 </div>
                             ))}
                         </div>
@@ -122,5 +215,32 @@ export default function SrsArchive({ items }: SrsArchiveProps) {
                 </div>
             )}
         </div>
+    );
+}
+
+/** 形态标签。 */
+function FormChip({ form }: { form: SrsReviewForm }) {
+    const { t } = useTranslation('pages');
+    return (
+        <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-muted-foreground">
+            {t(FORM_LABEL[form])}
+        </span>
+    );
+}
+
+/** 判定标签。 */
+function VerdictLabel({ verdict }: { verdict: SrsVerdict }) {
+    const { t } = useTranslation('pages');
+    return (
+        <span
+            className={cn(
+                'shrink-0',
+                verdict === 'forgot' && 'text-red-500',
+                verdict === 'fuzzy' && 'text-amber-600 dark:text-amber-400',
+                verdict === 'known' && 'text-emerald-600 dark:text-emerald-400',
+            )}
+        >
+            {t(VERDICT_LABEL[verdict])}
+        </span>
     );
 }

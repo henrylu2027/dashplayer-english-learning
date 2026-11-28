@@ -92,6 +92,8 @@ export interface SrsQueueQuery {
  * 一条复习日志。
  */
 export interface SrsReviewLogEntry {
+    /** 日志 ID；插入时不需要。 */
+    id?: number;
     /** 卡片 ID。 */
     cardId: number;
     /** 本次形态。 */

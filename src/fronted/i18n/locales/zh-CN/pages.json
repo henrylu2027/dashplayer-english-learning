@@ -356,7 +356,7 @@
         "limitSaveFailed": "保存每日新卡上限失败",
         "formShadowing": "跟读",
         "formDictation": "听写",
-        "formRecall": "认词",
+        "formRecall": "听音回忆",
         "dictationPrompt": "听原声，把整句写下来；词准确率 ≥ 80 分通过",
         "dictationPlaceholder": "在这里输入听到的句子",
         "dictationSubmit": "提交听写",
@@ -408,7 +408,16 @@
         "vocabHint": "先回忆这个词的词义，再展开对照",
         "archiveTitle": "复习记录",
         "archiveEmpty": "本次会话还没有判定",
-        "archiveAvg": "平均 {{score}} 分"
+        "archiveAvg": "平均 {{score}} 分",
+        "archiveSession": "本次会话",
+        "archiveHistory": "历史记录",
+        "addManual": "手动添加句子",
+        "addDialogTitle": "手动添加句子",
+        "addDialogHint": "自由文本没有原声，复习时按跟读处理；单个单词不会进入复习。",
+        "addDialogPlaceholder": "输入要复习的句子",
+        "addDialogConfirm": "加入复习",
+        "goToSource": "回到原片",
+        "locateFailed": "定位原片失败"
     },
     "dashboard": {
         "title": "学习台",

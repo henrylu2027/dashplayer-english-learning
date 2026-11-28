@@ -1,3 +1,4 @@
+import path from 'path';
 import { inject, injectable } from 'inversify';
 import TYPES from '@/backend/ioc/types';
 import { getMainLogger } from '@/backend/infrastructure/logger';
@@ -5,8 +6,12 @@ import type {
     SrsAddCardRequest,
     SrsAddCardResponse,
     SrsCard,
+    SrsCardLocation,
     SrsCheckRequest,
     SrsCheckResult,
+    SrsHistoryItem,
+    SrsHistoryRequest,
+    SrsHistoryResponse,
     SrsIngestRequest,
     SrsIngestResponse,
     SrsOverview,
@@ -20,6 +25,7 @@ import type {
     SrsVerdict,
     SrsVerdictRequest,
     SrsVerdictResult,
+    SrsWordDefinition,
 } from '@/common/contracts/srs';
 import {
     SRS_DEFAULT_DAILY_NEW_CARD_LIMIT,
@@ -31,6 +37,10 @@ import type { ShadowingAttemptSource } from '@/common/contracts/shadowing';
 import type { SettingsStore } from '@/backend/services/gateways/SettingsStore';
 import type SentenceAudioService from '@/backend/services/SentenceAudioService';
 import type SrsCardRepository from '@/backend/services/repositories/SrsCardRepository';
+import type WatchHistoryRepository from '@/backend/services/repositories/WatchHistoryRepository';
+import type WordsRepository from '@/backend/services/repositories/WordsRepository';
+import { WatchHistoryProjectType } from '@/backend/services/repositories/WatchHistoryRepository';
+import type SubtitleService from '@/backend/services/SubtitleService';
 import type ShadowingAttemptRepository from '@/backend/services/repositories/ShadowingAttemptRepository';
 import type PracticeAttemptRepository from '@/backend/services/repositories/PracticeAttemptRepository';
 import { resolveSrsReviewForm } from '@/common/utils/srsReviewForm';
@@ -118,6 +128,32 @@ export default interface SrsService {
      * @returns 当前页卡片与总数。
      */
     queue(request: SrsQueueRequest): Promise<SrsQueueResponse>;
+
+    /**
+     * 读取卡片目标词在词表里的释义。
+     *
+     * @param cardId 卡片 ID。
+     * @returns 目标词与中文释义；词表里没有释义时为 null。
+     * @throws 卡片不存在时抛出。
+     */
+    getWordDefinition(cardId: number): Promise<SrsWordDefinition>;
+
+    /**
+     * 定位卡片对应的原片与句子起始时间。
+     *
+     * @param cardId 卡片 ID。
+     * @returns 观看记录 ID 与句子起始秒数。
+     * @throws 卡片没有原声、找不到观看记录或字幕定位失败时抛出。
+     */
+    getCardLocation(cardId: number): Promise<SrsCardLocation>;
+
+    /**
+     * 读取最近的复习日志，供存档区的历史视图使用。
+     *
+     * @param request 返回条数。
+     * @returns 按时间倒序的记录；卡片已删除时文本为空。
+     */
+    history(request: SrsHistoryRequest): Promise<SrsHistoryResponse>;
 
     /**
      * 修改每日新卡上限；0 表示暂停入池。
@@ -304,6 +340,15 @@ export class SrsServiceImpl implements SrsService {
 
     @inject(TYPES.SettingsStore)
     private settingsStore!: SettingsStore;
+
+    @inject(TYPES.WordsRepository)
+    private wordsRepository!: WordsRepository;
+
+    @inject(TYPES.WatchHistoryRepository)
+    private watchHistoryRepository!: WatchHistoryRepository;
+
+    @inject(TYPES.SubtitleService)
+    private subtitleService!: SubtitleService;
 
     public async addCard(request: SrsAddCardRequest): Promise<SrsAddCardResponse> {
         const referenceText = request.referenceText.trim();
@@ -600,6 +645,69 @@ export class SrsServiceImpl implements SrsService {
             offset,
             limit,
         });
+    }
+
+    public async getCardLocation(cardId: number): Promise<SrsCardLocation> {
+        const card = await this.requireCard(cardId);
+        const videoPath = card.videoPath;
+        const subtitlePath = card.subtitlePath;
+        if (card.sourceKind !== 'video' || !videoPath || !subtitlePath || card.sentenceIndex === null) {
+            throw new Error('这张卡片没有可定位的原片');
+        }
+        const basePath = path.dirname(videoPath);
+        const fileName = path.basename(videoPath);
+        // 独立文件与目录入库的记录都按「目录 + 文件名」存，先按文件类型找，再回退目录类型
+        const history = await this.watchHistoryRepository.findOneByBasePathFileNameType(
+            basePath,
+            fileName,
+            WatchHistoryProjectType.FILE,
+        ) ?? await this.watchHistoryRepository.findOneByBasePathFileNameType(
+            basePath,
+            fileName,
+            WatchHistoryProjectType.DIRECTORY,
+        );
+        if (!history) {
+            throw new Error('找不到这段视频的观看记录，请先在播放器里打开一次');
+        }
+        const parsed = await this.subtitleService.parseSrt(subtitlePath);
+        const sentence = parsed.sentences.find((item) => item.index === card.sentenceIndex);
+        if (!sentence) {
+            throw new Error('字幕里找不到这一句，无法定位原片');
+        }
+        return {
+            historyId: history.id,
+            startSeconds: sentence.adjustedStart ?? sentence.start,
+        };
+    }
+
+    public async getWordDefinition(cardId: number): Promise<SrsWordDefinition> {
+        const card = await this.requireCard(cardId);
+        const word = card.word?.trim() ?? '';
+        if (!word) {
+            return { word: '', translate: null };
+        }
+        const row = await this.wordsRepository.findByWord(word);
+        return { word, translate: row?.translate?.trim() || null };
+    }
+
+    public async history(request: SrsHistoryRequest): Promise<SrsHistoryResponse> {
+        const limit = Math.min(500, Math.max(1, Math.floor(request.limit ?? 100)));
+        const entries = await this.srsCardRepository.listReviewLog(0, limit);
+        const items: SrsHistoryItem[] = [];
+        for (const entry of entries) {
+            const card = await this.srsCardRepository.findById(entry.cardId);
+            items.push({
+                id: entry.id ?? 0,
+                cardId: entry.cardId,
+                text: card?.referenceText ?? '',
+                form: entry.form,
+                score: entry.score,
+                passed: entry.passed,
+                verdict: entry.verdict,
+                createdAt: entry.createdAt,
+            });
+        }
+        return { items };
     }
 
     /**

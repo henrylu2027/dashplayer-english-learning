@@ -95,8 +95,11 @@ import type {
 import type {
     SrsAddCardRequest,
     SrsAddCardResponse,
+    SrsCardLocation,
     SrsCheckRequest,
     SrsCheckResult,
+    SrsHistoryRequest,
+    SrsHistoryResponse,
     SrsIngestRequest,
     SrsIngestResponse,
     SrsOverview,
@@ -106,6 +109,7 @@ import type {
     SrsSubmitReviewRequest,
     SrsVerdictRequest,
     SrsVerdictResult,
+    SrsWordDefinition,
 } from '@/common/contracts/srs';
 import type { DashboardSummary } from '@/common/contracts/dashboard';
 import type {
@@ -588,6 +592,9 @@ interface SrsDef {
     'srs/submit-review': { params: SrsSubmitReviewRequest, return: SrsReviewOutcome };
     'srs/remove-card': { params: { cardId: number }, return: void };
     'srs/sentence-audio': { params: { cardId: number }, return: string };
+    'srs/card-location': { params: { cardId: number }, return: SrsCardLocation };
+    'srs/word-definition': { params: { cardId: number }, return: SrsWordDefinition };
+    'srs/history': { params: SrsHistoryRequest, return: SrsHistoryResponse };
     'srs/set-daily-limit': { params: { limit: number }, return: number };
 }
 

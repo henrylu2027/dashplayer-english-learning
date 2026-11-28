@@ -356,7 +356,7 @@
         "limitSaveFailed": "Failed to save the daily limit",
         "formShadowing": "Shadowing",
         "formDictation": "Dictation",
-        "formRecall": "Recall",
+        "formRecall": "Listening recall",
         "dictationPrompt": "Listen and type the whole sentence; pass at 80% word accuracy",
         "dictationPlaceholder": "Type what you hear",
         "dictationSubmit": "Submit dictation",
@@ -408,7 +408,16 @@
         "vocabHint": "Recall the meaning first, then reveal it",
         "archiveTitle": "Review log",
         "archiveEmpty": "No verdicts in this session yet",
-        "archiveAvg": "Avg {{score}}"
+        "archiveAvg": "Avg {{score}}",
+        "archiveSession": "This session",
+        "archiveHistory": "History",
+        "addManual": "Add sentence",
+        "addDialogTitle": "Add a sentence",
+        "addDialogHint": "Custom text has no original audio and will be reviewed by shadowing. Single words are not sent to review.",
+        "addDialogPlaceholder": "Type the sentence to review",
+        "addDialogConfirm": "Add to review",
+        "goToSource": "Open source",
+        "locateFailed": "Failed to locate the source video"
     },
     "dashboard": {
         "title": "Dashboard",

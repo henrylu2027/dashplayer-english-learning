@@ -489,6 +489,7 @@ export default class SrsCardRepositoryImpl implements SrsCardRepository {
             .limit(limit)
             .all()
             .map((row) => ({
+                id: row.id,
                 cardId: row.card_id,
                 form: row.form as SrsReviewForm,
                 score: row.score,

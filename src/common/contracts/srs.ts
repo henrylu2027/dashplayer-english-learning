@@ -325,3 +325,61 @@ export interface SrsQueueResponse {
     /** 该范围与筛选下的总数。 */
     total: number;
 }
+
+/**
+ * 卡片的词表释义。
+ */
+export interface SrsWordDefinition {
+    /** 目标词。 */
+    word: string;
+    /** 中文释义；词表里没有时为 null。 */
+    translate: string | null;
+}
+
+/**
+ * 卡片在播放器里的定位信息。
+ */
+export interface SrsCardLocation {
+    /** 观看记录 ID，可直接拼到 `#/player/<id>`。 */
+    historyId: string;
+    /** 句子起始时间，单位为秒。 */
+    startSeconds: number;
+}
+
+/**
+ * 一条历史复习记录。
+ */
+export interface SrsHistoryItem {
+    /** 日志 ID。 */
+    id: number;
+    /** 卡片 ID。 */
+    cardId: number;
+    /** 词句预览。 */
+    text: string;
+    /** 本次形态。 */
+    form: SrsReviewForm;
+    /** 机器分；没有机器分时为 null。 */
+    score: number | null;
+    /** 机器分是否通过；没有机器分为 null。 */
+    passed: boolean | null;
+    /** 用户判定。 */
+    verdict: SrsVerdict;
+    /** 判定时间，epoch 毫秒。 */
+    createdAt: number;
+}
+
+/**
+ * 历史复习记录查询。
+ */
+export interface SrsHistoryRequest {
+    /** 返回最近多少条，默认 100，最大 500。 */
+    limit?: number;
+}
+
+/**
+ * 历史复习记录结果。
+ */
+export interface SrsHistoryResponse {
+    /** 按时间倒序的记录。 */
+    items: SrsHistoryItem[];
+}

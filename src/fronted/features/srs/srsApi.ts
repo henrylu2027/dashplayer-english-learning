@@ -1,8 +1,11 @@
 import type {
     SrsAddCardRequest,
     SrsAddCardResponse,
+    SrsCardLocation,
     SrsCheckRequest,
     SrsCheckResult,
+    SrsHistoryRequest,
+    SrsHistoryResponse,
     SrsOverview,
     SrsQueueRequest,
     SrsQueueResponse,
@@ -10,6 +13,7 @@ import type {
     SrsSubmitReviewRequest,
     SrsVerdictRequest,
     SrsVerdictResult,
+    SrsWordDefinition,
 } from '@/common/contracts/srs';
 import { backendClient } from '@/fronted/infrastructure/electron/backendClient';
 
@@ -48,6 +52,18 @@ export const srsApi = {
     /** 提取并返回卡片句子的原声音频路径。 */
     sentenceAudio: (cardId: number): Promise<string> =>
         backendClient.call('srs/sentence-audio', { cardId }),
+
+    /** 定位卡片对应的原片与句子起始时间。 */
+    cardLocation: (cardId: number): Promise<SrsCardLocation> =>
+        backendClient.call('srs/card-location', { cardId }),
+
+    /** 读取卡片目标词在词表里的释义。 */
+    wordDefinition: (cardId: number): Promise<SrsWordDefinition> =>
+        backendClient.call('srs/word-definition', { cardId }),
+
+    /** 读取最近的复习日志。 */
+    history: (params: SrsHistoryRequest = {}): Promise<SrsHistoryResponse> =>
+        backendClient.call('srs/history', params),
 
     /** 修改每日新卡上限；0 表示暂停入池。 */
     setDailyLimit: (limit: number): Promise<number> =>

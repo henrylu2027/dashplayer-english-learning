@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState, type RefObject } from 'react'
 import { useTranslation } from 'react-i18next';
 import toast from 'react-hot-toast';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { BookmarkPlus, BookOpen, Loader2, Repeat } from 'lucide-react';
+import { BookmarkPlus, BookOpen, Loader2, Plus, Repeat } from 'lucide-react';
 
 import type {
     SrsCard,
@@ -28,6 +28,7 @@ import { usePlayer } from '@/fronted/features/player/playerStore';
 import { buildVideoShadowingSource } from '@/fronted/features/shadowing/shadowingSource';
 import { getRendererLogger } from '@/fronted/log/simple-logger';
 import { cn } from '@/fronted/lib/utils';
+import AddCardDialog from './components/AddCardDialog';
 import ReviewPanel, { type ReviewSubmission } from './components/ReviewPanel';
 import SrsArchive, { type ArchiveItem } from './components/SrsArchive';
 import SrsQueueItem from './components/SrsQueueItem';
@@ -94,6 +95,7 @@ export default function SrsReviewPage() {
     const [archive, setArchive] = useState<ArchiveItem[]>([]);
     const [pendingDelete, setPendingDelete] = useState<SrsCard | null>(null);
     const [adding, setAdding] = useState(false);
+    const [addDialogOpen, setAddDialogOpen] = useState(false);
 
     /** 首次加载成功时自动选中第一张可复习卡，之后不再干预用户选择。 */
     const didAutoSelectRef = useRef(false);
@@ -449,6 +451,16 @@ export default function SrsReviewPage() {
                             size="sm"
                             variant="outline"
                             className="h-8 rounded-lg px-3 text-xs"
+                            onClick={() => setAddDialogOpen(true)}
+                        >
+                            <Plus className="mr-1 h-3.5 w-3.5" />
+                            {t('srs.addManual')}
+                        </Button>
+                        <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            className="h-8 rounded-lg px-3 text-xs"
                             disabled={!currentSentence || adding}
                             title={currentSentence ? undefined : t('srs.noCurrentSentence')}
                             onClick={() => void handleAddCurrent()}
@@ -624,6 +636,15 @@ export default function SrsReviewPage() {
             />
 
             <SrsArchive items={archive} />
+
+            {addDialogOpen && (
+                <AddCardDialog
+                    onClose={() => setAddDialogOpen(false)}
+                    onAdded={async () => {
+                        await fetchOverviewAndGroups();
+                    }}
+                />
+            )}
 
             <AlertDialog open={pendingDelete !== null} onOpenChange={(open) => !open && setPendingDelete(null)}>
                 <AlertDialogContent>

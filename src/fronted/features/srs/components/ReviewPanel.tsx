@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import toast from 'react-hot-toast';
-import { Eye, EyeOff, Loader2, Mic, Square, Volume2 } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { Eye, EyeOff, Loader2, Mic, Play, Square, Volume2 } from 'lucide-react';
 
 import type {
     SrsCard,
@@ -90,6 +91,7 @@ function formatElapsed(seconds: number): string {
 
 export default function ReviewPanel({ card, onSubmit }: ReviewPanelProps) {
     const { t } = useTranslation('pages');
+    const navigate = useNavigate();
     const form = resolveSrsReviewForm(card);
     const recorder = useShadowingRecorder(card.referenceText, shadowingSourceFromCard(card));
 
@@ -98,6 +100,8 @@ export default function ReviewPanel({ card, onSubmit }: ReviewPanelProps) {
     const [submitError, setSubmitError] = useState<string | null>(null);
     const [audioPhase, setAudioPhase] = useState<AudioPhase>('idle');
     const [revealed, setRevealed] = useState(false);
+    /** 词汇卡展开后的词表释义；没有释义或未加载时为 null。 */
+    const [definition, setDefinition] = useState<string | null>(null);
     const audioRef = useRef<HTMLAudioElement | null>(null);
     /** 已提交过的跟读记录，避免组件重渲染导致同一次成绩重复提交。 */
     const submittedAttemptRef = useRef<number | null>(null);
@@ -107,6 +111,25 @@ export default function ReviewPanel({ card, onSubmit }: ReviewPanelProps) {
     const [dictationWords, setDictationWords] = useState<ShadowingWordFeedback[]>([]);
 
     const canListen = hasSrsAudio(card);
+    /** 定位「回到原片」请求进行中。 */
+    const [locating, setLocating] = useState(false);
+
+    /** 跳到播放器并 seek 到本句开头。 */
+    const goToSource = async (): Promise<void> => {
+        if (locating) {
+            return;
+        }
+        setLocating(true);
+        try {
+            const location = await srsApi.cardLocation(card.id);
+            navigate(`/player/${location.historyId}?srsSeek=${Math.max(0, Math.floor(location.startSeconds))}`);
+        } catch (error) {
+            logger.error('定位原片失败', { error, cardId: card.id });
+            toast.error(error instanceof Error ? error.message : t('srs.locateFailed'));
+        } finally {
+            setLocating(false);
+        }
+    };
 
     const stopAudio = (): void => {
         audioRef.current?.pause();
@@ -222,6 +245,13 @@ export default function ReviewPanel({ card, onSubmit }: ReviewPanelProps) {
     const reveal = (): void => {
         setRevealed(true);
         reportReady(null);
+        if (form === 'vocab' && definition === null && card.word) {
+            srsApi.wordDefinition(card.id)
+                .then((result) => setDefinition(result.translate))
+                .catch((error) => {
+                    logger.error('读取词表释义失败', { error, cardId: card.id });
+                });
+        }
     };
 
     return (
@@ -244,6 +274,21 @@ export default function ReviewPanel({ card, onSubmit }: ReviewPanelProps) {
                     )}
                     {card.lastScore !== null && (
                         <span>{t('srs.lastScore', { score: card.lastScore })}</span>
+                    )}
+                    {canListen && (
+                        <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            className="ml-auto h-7 rounded-lg px-2.5 text-[11px]"
+                            disabled={locating}
+                            onClick={() => void goToSource()}
+                        >
+                            {locating
+                                ? <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+                                : <Play className="mr-1 h-3 w-3" />}
+                            {t('srs.goToSource')}
+                        </Button>
                     )}
                 </div>
             </div>
@@ -432,6 +477,11 @@ export default function ReviewPanel({ card, onSubmit }: ReviewPanelProps) {
                         </div>
                         {revealed ? (
                             <>
+                                {definition && (
+                                    <p className="rounded-xl bg-primary/5 px-3 py-2 text-sm text-primary">
+                                        {definition}
+                                    </p>
+                                )}
                                 <p className="text-lg leading-8 text-foreground">{card.referenceText}</p>
                                 <div className="flex flex-wrap items-center gap-2">
                                     <Button
