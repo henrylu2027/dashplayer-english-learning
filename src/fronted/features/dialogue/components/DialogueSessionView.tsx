@@ -22,6 +22,7 @@ import { cn } from '@/fronted/lib/utils';
 import { dialogueApi } from '../dialogueApi';
 import DialogueComposer from './DialogueComposer';
 import SceneCardView from './SceneCardView';
+import ScenePracticeView from './ScenePracticeView';
 import TurnEvaluationPanel from './TurnEvaluationPanel';
 
 const logger = getRendererLogger('DialogueSessionView');
@@ -74,7 +75,7 @@ function ToolbarMenu<T extends string | number>({
                 onClick={() => setOpen((value) => !value)}
                 className="flex h-8 max-w-60 items-center gap-1.5 rounded-full border border-border/60 bg-card px-3 text-xs text-foreground"
             >
-                {label && <span className="text-muted-foreground">{label}</span>}
+                {label && <span className="shrink-0 whitespace-nowrap text-muted-foreground">{label}</span>}
                 <span className="truncate">{text}</span>
                 <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
             </button>
@@ -519,6 +520,7 @@ export default function DialogueSessionView({
 
                     <SceneCardView
                         scene={scene}
+                        showPractice={false}
                         onSpeak={(text) => void speak(text, aiVoice)}
                         actions={(
                             <>
@@ -667,7 +669,7 @@ export default function DialogueSessionView({
                     className="w-1.5 shrink-0 cursor-col-resize rounded-full bg-border/50 transition-colors hover:bg-primary/40"
                 />
 
-                {/* 右：参考句式在上，评测在下 */}
+                {/* 右：参考句式与练习点在上，评测在下 */}
                 <div style={{ width: rightWidth }} className="flex min-h-0 shrink-0 flex-col gap-4 overflow-y-auto">
                     <section className="rounded-2xl border border-border/60 bg-card p-4 shadow-xs">
                         <h2 className="text-sm font-medium text-foreground">{t('dialogue.targets')}</h2>
@@ -688,6 +690,14 @@ export default function DialogueSessionView({
                             ))}
                         </div>
                     </section>
+                    {scene.practice && (
+                        <section className="rounded-2xl border border-border/60 bg-card p-4 shadow-xs">
+                            <ScenePracticeView
+                                practice={scene.practice}
+                                onSpeak={(text) => void speak(text, aiVoice)}
+                            />
+                        </section>
+                    )}
                     <TurnEvaluationPanel
                         evaluation={evaluation}
                         pronunciation={pronunciation}
