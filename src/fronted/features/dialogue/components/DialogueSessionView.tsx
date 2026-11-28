@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import toast from 'react-hot-toast';
-import { ArrowLeft, BookOpen, CheckCheck, Loader2, Play, RotateCcw, Volume2 } from 'lucide-react';
+import { ArrowLeft, BookOpen, CheckCheck, ChevronDown, Loader2, Play, RotateCcw, Volume2 } from 'lucide-react';
 
 import type {
     DialogueDifficulty,
@@ -29,15 +29,98 @@ const logger = getRendererLogger('DialogueSessionView');
 /** 难度下拉的文案 key 前缀。 */
 const DIFFICULTY_LABEL = 'dialogue.difficulty';
 
+/** 声线：女声用原声，男声用降速不保音高的近似。 */
+type Voice = 'female' | 'male';
+
+/** 男声的播放速率：0.88 约降两个半音，语速略慢。 */
+const MALE_RATE = 0.88;
+
+/** 右栏宽度范围（拖动分隔条时使用）。 */
+const RIGHT_MIN = 280;
+const RIGHT_MAX = 640;
+
+/**
+ * 工具栏下拉：自绘菜单，展开后点选项才收起。
+ *
+ * 说明：原生 select 在这个页面会被上层容器吞掉点击（一松手就缩回），
+ * 改成按钮 + 下拉面板后交互完全可控。
+ *
+ * @param props.label 左侧小标签。
+ * @param props.text 按钮上显示的文字。
+ * @param props.options 选项列表。
+ * @param props.onSelect 选中回调。
+ * @param props.align 面板对齐方向。
+ */
+function ToolbarMenu<T extends string | number>({
+    label,
+    text,
+    activeValue,
+    options,
+    onSelect,
+    align = 'right',
+}: {
+    label?: string;
+    text: string;
+    activeValue?: T;
+    options: Array<{ value: T; label: string }>;
+    onSelect: (value: T) => void;
+    align?: 'left' | 'right';
+}) {
+    const [open, setOpen] = useState(false);
+    return (
+        <div className="relative">
+            <button
+                type="button"
+                onClick={() => setOpen((value) => !value)}
+                className="flex h-8 max-w-60 items-center gap-1.5 rounded-full border border-border/60 bg-card px-3 text-xs text-foreground"
+            >
+                {label && <span className="text-muted-foreground">{label}</span>}
+                <span className="truncate">{text}</span>
+                <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+            </button>
+            {open && (
+                <>
+                    <button
+                        type="button"
+                        aria-label="close"
+                        className="fixed inset-0 z-30 cursor-default"
+                        onClick={() => setOpen(false)}
+                    />
+                    <div
+                        className={cn(
+                            'absolute z-40 mt-1 max-h-72 w-60 overflow-y-auto rounded-xl border border-border/60 bg-popover p-1 shadow-lg',
+                            align === 'right' ? 'right-0' : 'left-0',
+                        )}
+                    >
+                        {options.map((option) => (
+                            <button
+                                key={option.value}
+                                type="button"
+                                onClick={() => {
+                                    onSelect(option.value);
+                                    setOpen(false);
+                                }}
+                                className={cn(
+                                    'block w-full truncate rounded-lg px-2.5 py-1.5 text-left text-xs transition-colors hover:bg-muted',
+                                    option.value === activeValue && 'bg-muted/60',
+                                )}
+                            >
+                                {option.label}
+                            </button>
+                        ))}
+                    </div>
+                </>
+            )}
+        </div>
+    );
+}
+
 /**
  * 进行中的场景对话：AI 扮演一个角色，逐轮回复并评测学习者的上一句。
  *
- * 说明：气泡里只有角色台词，所有点评、纠错、连读建议都进右侧评测面板；
- * 每轮请求都带着完整对话历史、场景背景、角色与难度，模型只在固定人设下发挥。
- *
  * @param props.session 会话摘要。
  * @param props.scene 场景卡。
- * @param props.scenes 最近对话的场景，供工具栏切换；当前会话也在里面。
+ * @param props.scenes 最近对话的场景，供工具栏切换。
  * @param props.onFinished 复盘完成回调。
  * @param props.onBack 返回会话列表。
  * @param props.onOpenHistory 打开某条历史会话。
@@ -60,26 +143,23 @@ export default function DialogueSessionView({
     onOpenHistory: (sessionId: number) => void;
 }) {
     const { t } = useTranslation('pages');
-    /** 已落库的回合；加载完成前只有内存里的开场白。 */
     const [turns, setTurns] = useState<DialogueTurnVO[]>([]);
     const [loading, setLoading] = useState(true);
-    /** 最近一轮学习者的评测，显示在右栏。 */
     const [evaluation, setEvaluation] = useState<DialogueTurnEvaluation | null>(null);
-    /** 独立发音模块给出的最近一次发音分；没有录音时为 null。 */
     const [pronunciation, setPronunciation] = useState<number | null>(null);
-    /** 本轮所有学习者评测，用于批量提取生词。 */
     const [evaluations, setEvaluations] = useState<DialogueTurnEvaluation[]>([]);
     const [sending, setSending] = useState(false);
     const [finishing, setFinishing] = useState(false);
     const [savingWords, setSavingWords] = useState(false);
     const [savingBatch, setSavingBatch] = useState(false);
-    /** 难度：只影响这一轮提示词里的句式复杂度。 */
     const [difficulty, setDifficulty] = useState<DialogueDifficulty>(session.difficulty);
-    /** 气泡区自己的滚动容器：新回合只把气泡区滚到底，不带动整页。 */
+    /** AI 用女声、学习者用男声，默认就能听出是两个人。 */
+    const [aiVoice, setAiVoice] = useState<Voice>('female');
+    const [learnerVoice, setLearnerVoice] = useState<Voice>('male');
+    /** 右栏宽度：拖动分隔条时变化。 */
+    const [rightWidth, setRightWidth] = useState(380);
     const bubbleListRef = useRef<HTMLDivElement | null>(null);
-    /** 已经自动入库的词，避免同一个词反复写库。 */
     const savedWordsRef = useRef<Set<string>>(new Set());
-    /** 朗读队列：说话人 A 读完才轮到 AI，避免两个声音叠在一起。 */
     const speechQueueRef = useRef<Promise<void>>(Promise.resolve());
     const mountedRef = useRef(true);
 
@@ -90,16 +170,20 @@ export default function DialogueSessionView({
     /**
      * 把一句台词排进朗读队列；前一句读完才会开口。
      * @param text 要朗读的英文。
+     * @param voice 声线。
      * @returns 这句读完（或失败）后 resolve 的 promise。
      */
-    const speak = useCallback((text: string): Promise<void> => {
+    const speak = useCallback((text: string, voice: Voice): Promise<void> => {
         if (!text.trim()) {
             return Promise.resolve();
         }
         speechQueueRef.current = speechQueueRef.current
             .then(async () => {
                 const url = await getTtsUrl(text);
-                await playAudioUrlAndWait(url);
+                await playAudioUrlAndWait(
+                    url,
+                    voice === 'male' ? { rate: MALE_RATE, preservePitch: false } : undefined,
+                );
             })
             .catch((error) => {
                 logger.warn('朗读失败', { error });
@@ -107,7 +191,6 @@ export default function DialogueSessionView({
         return speechQueueRef.current;
     }, []);
 
-    /** 读取已落库的回合；刚创建时只有开场白。 */
     useEffect(() => {
         let cancelled = false;
         dialogueApi.detail(session.id)
@@ -124,7 +207,6 @@ export default function DialogueSessionView({
             })
             .catch((error) => {
                 logger.error('读取对话回合失败', { error, sessionId: session.id });
-                // 读不到历史时至少把开场白显示出来，不让用户对着空白页
                 setTurns([{
                     id: -1,
                     role: 'assistant',
@@ -143,7 +225,7 @@ export default function DialogueSessionView({
         return () => {
             cancelled = true;
         };
-    }, [scene.openingHintZh, scene.openingLineEn, session.id]);
+    }, [scene.openingLineEn, session.id]);
 
     useEffect(() => {
         const list = bubbleListRef.current;
@@ -151,6 +233,26 @@ export default function DialogueSessionView({
             list.scrollTo({ top: list.scrollHeight, behavior: 'smooth' });
         }
     }, [turns, sending]);
+
+    /**
+     * 拖动分隔条调整右栏宽度。
+     * @param event 鼠标按下事件。
+     */
+    const startResize = (event: React.MouseEvent<HTMLElement>): void => {
+        event.preventDefault();
+        const startX = event.clientX;
+        const startWidth = rightWidth;
+        const move = (moveEvent: MouseEvent): void => {
+            const next = Math.min(RIGHT_MAX, Math.max(RIGHT_MIN, startWidth - (moveEvent.clientX - startX)));
+            setRightWidth(next);
+        };
+        const up = (): void => {
+            window.removeEventListener('mousemove', move);
+            window.removeEventListener('mouseup', up);
+        };
+        window.addEventListener('mousemove', move);
+        window.addEventListener('mouseup', up);
+    };
 
     /**
      * 把生词写进词汇工坊；已经写过的词跳过。
@@ -178,7 +280,7 @@ export default function DialogueSessionView({
     }, []);
 
     /**
-     * 发送学习者这一句：后端落库两条回合并返回评测。
+     * 发送学习者这一句：先朗读学习者的句子，读完才出 AI 字幕和声音。
      * @param text 学习者输入。
      * @param meta 录音线索。
      */
@@ -190,9 +292,17 @@ export default function DialogueSessionView({
             return;
         }
         setSending(true);
-        // 说话人 A（学习者）先出声；AI 的台词排在队列后面，等这句读完才开口
-        void speak(text);
-        // 发音分由独立发音评测模块给出；没有录音就留空
+        setTurns((previous) => [...previous, {
+            id: -Date.now(),
+            role: 'user',
+            content: text,
+            cardId: null,
+            correction: null,
+            evaluation: null,
+            createdAt: Date.now(),
+        }]);
+        // 说话人 A（学习者）先出声，读完才轮到 AI
+        const learnerSpeech = speak(text, learnerVoice);
         setPronunciation(null);
         if (meta?.audio && meta.audio.byteLength > 0) {
             void practiceApi.retell({
@@ -217,24 +327,33 @@ export default function DialogueSessionView({
             if (!mountedRef.current) {
                 return;
             }
-            setTurns((previous) => [...previous, result.userTurn, result.assistantTurn]);
+            // 用落库后的回合替换临时气泡
+            setTurns((previous) => previous.map((turn) => (
+                turn.id < 0 && turn.role === 'user' && turn.content === text ? result.userTurn : turn
+            )));
             const turnEvaluation = result.userTurn.evaluation;
             setEvaluation(turnEvaluation);
             if (turnEvaluation) {
                 setEvaluations((previous) => [...previous, turnEvaluation]);
-                // 生词统一入库：模型提取的生词 + 单词级的错词，右侧面板展示的同时写进词汇工坊
                 const autoWords = [
                     ...turnEvaluation.vocab,
                     ...turnEvaluation.errorList
                         .map((item) => item.word.trim())
                         .filter((word) => /^[A-Za-z][A-Za-z'-]*$/.test(word)),
                 ];
-                const added = await saveVocab(autoWords);
-                if (added > 0) {
-                    toast.success(t('dialogue.vocabAutoSaved', { count: added }));
-                }
+                void saveVocab(autoWords).then((added) => {
+                    if (added > 0) {
+                        toast.success(t('dialogue.vocabAutoSaved', { count: added }));
+                    }
+                });
             }
-            void speak(result.assistantTurn.content);
+            // 学习者这句播完，才出 AI 字幕，再接 AI 声音
+            await learnerSpeech;
+            if (!mountedRef.current) {
+                return;
+            }
+            setTurns((previous) => [...previous, result.assistantTurn]);
+            void speak(result.assistantTurn.content, aiVoice);
         } catch (error) {
             logger.error('对话回复失败', { error, sessionId: session.id });
             toast.error(error instanceof Error ? error.message : t('dialogue.turnFailed'));
@@ -258,7 +377,6 @@ export default function DialogueSessionView({
         }
     };
 
-    /** 手动把本轮生词再写一遍；自动入库已经写过的不会重复。 */
     const handleAddWords = async (): Promise<void> => {
         const words = evaluation?.vocab ?? [];
         if (words.length === 0) {
@@ -276,10 +394,6 @@ export default function DialogueSessionView({
         }
     };
 
-    /**
-     * 批量提取本轮生词：汇总每轮评测里的生词与错词，写进词汇工坊，
-     * 同时逐条加入间隔复习队列。
-     */
     const handleBatchWords = async (): Promise<void> => {
         const words = new Set<string>();
         for (const turn of evaluations) {
@@ -289,7 +403,6 @@ export default function DialogueSessionView({
                 }
             }
             for (const item of turn.errorList) {
-                // 只把单词级的错误吸收进生词本；整句片段进 SRS 没有复习价值
                 const word = item.word.trim();
                 if (/^[A-Za-z][A-Za-z'-]*$/.test(word)) {
                     words.add(word);
@@ -337,52 +450,66 @@ export default function DialogueSessionView({
     };
 
     const learnerTurnCount = useMemo(() => turns.filter((turn) => turn.role === 'user').length, [turns]);
+    const voiceOptions: Array<{ value: Voice; label: string }> = [
+        { value: 'female', label: t('dialogue.voiceFemale') },
+        { value: 'male', label: t('dialogue.voiceMale') },
+    ];
+    const sceneOptions = [
+        {
+            value: session.id,
+            label: `${session.title || scene.title} · ${session.anchorText.slice(0, 24)}`,
+        },
+        ...scenes
+            .filter((item) => item.id !== session.id)
+            .map((item) => ({ value: item.id, label: `${item.title} · ${item.anchorText.slice(0, 24)}` })),
+    ];
+    const difficultyOptions = DIALOGUE_DIFFICULTIES.map((value) => ({
+        value,
+        label: t(`${DIFFICULTY_LABEL}.${value}`),
+    }));
 
     return (
         <div className="flex flex-col gap-4">
-            {/* 顶部工具栏 */}
-            {/* 工具栏贴在滚动区顶部：内容滚动时下拉框不会被页面标题盖住，始终可点 */}
+            {/* 工具栏 */}
             <div className="sticky top-0 z-20 -mx-1 flex flex-wrap items-center gap-2 rounded-xl bg-background/95 px-1 py-1 backdrop-blur">
                 <div className="ml-auto flex flex-wrap items-center gap-2">
-                    <div className="flex items-center gap-1.5 rounded-full border border-border/60 bg-card pl-3 pr-1 py-1 text-xs text-muted-foreground">
-                        {t('dialogue.sceneLabel')}
-                        <select
-                            value={session.id}
-                            onChange={(event) => {
-                                const nextId = Number(event.target.value);
-                                if (nextId !== session.id) {
-                                    onOpenHistory(nextId);
-                                }
-                            }}
-                            className="max-w-52 truncate rounded-full bg-transparent py-1 pr-2 text-xs text-foreground outline-none"
-                        >
-                            <option value={session.id}>
-                                {session.title || scene.title} · {session.anchorText.slice(0, 24)}
-                            </option>
-                            {scenes
-                                .filter((item) => item.id !== session.id)
-                                .map((item) => (
-                                    <option key={item.id} value={item.id}>
-                                        {item.title} · {item.anchorText.slice(0, 24)}
-                                    </option>
-                                ))}
-                        </select>
-                    </div>
-                    <select
-                        value={difficulty}
-                        onChange={(event) => setDifficulty(event.target.value as DialogueDifficulty)}
-                        className="h-8 rounded-full border border-border/60 bg-card px-3 text-xs text-foreground outline-none"
-                    >
-                        {DIALOGUE_DIFFICULTIES.map((item) => (
-                            <option key={item} value={item}>{t(`${DIFFICULTY_LABEL}.${item}`)}</option>
-                        ))}
-                    </select>
+                    <ToolbarMenu
+                        label={t('dialogue.sceneLabel')}
+                        text={sceneOptions[0].label}
+                        activeValue={session.id}
+                        options={sceneOptions}
+                        onSelect={(value) => {
+                            if (value !== session.id) {
+                                onOpenHistory(value);
+                            }
+                        }}
+                    />
+                    <ToolbarMenu
+                        text={t(`${DIFFICULTY_LABEL}.${difficulty}`)}
+                        activeValue={difficulty}
+                        options={difficultyOptions}
+                        onSelect={setDifficulty}
+                    />
+                    <ToolbarMenu
+                        label={t('dialogue.voiceAi')}
+                        text={t(aiVoice === 'male' ? 'dialogue.voiceMale' : 'dialogue.voiceFemale')}
+                        activeValue={aiVoice}
+                        options={voiceOptions}
+                        onSelect={setAiVoice}
+                    />
+                    <ToolbarMenu
+                        label={t('dialogue.voiceLearner')}
+                        text={t(learnerVoice === 'male' ? 'dialogue.voiceMale' : 'dialogue.voiceFemale')}
+                        activeValue={learnerVoice}
+                        options={voiceOptions}
+                        onSelect={setLearnerVoice}
+                    />
                 </div>
             </div>
 
-            <div className="grid min-h-0 gap-4 lg:grid-cols-[minmax(0,1fr)_380px]">
+            <div className="flex min-h-0 items-stretch gap-1">
                 {/* 左：对话练习 */}
-                <section className="flex min-w-0 flex-col gap-4 rounded-2xl border border-border/60 bg-card p-5 shadow-xs">
+                <section className="flex min-w-0 flex-1 flex-col gap-4 rounded-2xl border border-border/60 bg-card p-5 shadow-xs">
                     <div className="flex items-center justify-between gap-2">
                         <h2 className="text-sm font-medium text-foreground">{t('dialogue.chatTitle')}</h2>
                         <span className="text-xs text-muted-foreground">
@@ -392,7 +519,7 @@ export default function DialogueSessionView({
 
                     <SceneCardView
                         scene={scene}
-                        onSpeak={speak}
+                        onSpeak={(text) => void speak(text, aiVoice)}
                         actions={(
                             <>
                                 <Button
@@ -437,7 +564,7 @@ export default function DialogueSessionView({
                                 {turn.role === 'assistant' && (
                                     <button
                                         type="button"
-                                        onClick={() => void speak(turn.content)}
+                                        onClick={() => void speak(turn.content, aiVoice)}
                                         aria-label={t('dialogue.speak')}
                                         className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground transition-colors hover:text-foreground"
                                     >
@@ -476,7 +603,7 @@ export default function DialogueSessionView({
                                 {turn.role === 'user' && (
                                     <button
                                         type="button"
-                                        onClick={() => void speak(turn.content)}
+                                        onClick={() => void speak(turn.content, learnerVoice)}
                                         aria-label={t('dialogue.speak')}
                                         className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground transition-colors hover:text-foreground"
                                     >
@@ -532,20 +659,49 @@ export default function DialogueSessionView({
                     </div>
                 </section>
 
-                {/* 右：AI 评测 */}
-                <TurnEvaluationPanel
-                    evaluation={evaluation}
-                    pronunciation={pronunciation}
-                    pending={sending}
-                    savingWords={savingWords}
-                    onAddWords={() => void handleAddWords()}
-                    onRetry={() => {
-                        toast.success(t('dialogue.retryHint'));
-                    }}
-                    onContinue={() => {
-                        setPronunciation(null);
-                    }}
+                {/* 分隔条：拖动改变左右宽度 */}
+                <button
+                    type="button"
+                    aria-label={t('dialogue.resizeBar')}
+                    onMouseDown={startResize}
+                    className="w-1.5 shrink-0 cursor-col-resize rounded-full bg-border/50 transition-colors hover:bg-primary/40"
                 />
+
+                {/* 右：参考句式在上，评测在下 */}
+                <div style={{ width: rightWidth }} className="flex min-h-0 shrink-0 flex-col gap-4 overflow-y-auto">
+                    <section className="rounded-2xl border border-border/60 bg-card p-4 shadow-xs">
+                        <h2 className="text-sm font-medium text-foreground">{t('dialogue.targets')}</h2>
+                        <div className="mt-2 flex flex-wrap gap-1.5">
+                            {scene.targetExpressions.map((item) => (
+                                <button
+                                    key={item.en}
+                                    type="button"
+                                    onClick={() => void speak(item.en, aiVoice)}
+                                    className="group flex items-center gap-1.5 rounded-full border border-border/60 px-2.5 py-1 text-xs text-foreground/80 transition-colors hover:border-border hover:text-foreground"
+                                >
+                                    <span>{item.en}</span>
+                                    {item.zh.trim() !== '' && (
+                                        <span className="text-muted-foreground">{item.zh}</span>
+                                    )}
+                                    <Volume2 className="h-3 w-3 opacity-0 transition-opacity group-hover:opacity-100" />
+                                </button>
+                            ))}
+                        </div>
+                    </section>
+                    <TurnEvaluationPanel
+                        evaluation={evaluation}
+                        pronunciation={pronunciation}
+                        pending={sending}
+                        savingWords={savingWords}
+                        onAddWords={() => void handleAddWords()}
+                        onRetry={() => {
+                            toast.success(t('dialogue.retryHint'));
+                        }}
+                        onContinue={() => {
+                            setPronunciation(null);
+                        }}
+                    />
+                </div>
             </div>
         </div>
     );

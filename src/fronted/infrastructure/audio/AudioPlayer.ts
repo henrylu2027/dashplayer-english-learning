@@ -63,14 +63,20 @@ export const getWordAudioUrl = async (word: string): Promise<Nullable<string>> =
  * 播放失败或被打断时同样会 resolve，避免队列卡死。
  *
  * @param audioUrl 音频地址。
+ * @param options 播放速率与是否保持音高；降速 + 不保音高用来做男声近似。
  */
-export const playAudioUrlAndWait = async (audioUrl: Nullable<string>): Promise<void> => {
+export const playAudioUrlAndWait = async (
+    audioUrl: Nullable<string>,
+    options?: { rate?: number; preservePitch?: boolean },
+): Promise<void> => {
     if (TypeGuards.isNull(audioUrl)) {
         return;
     }
     player?.pause();
     player = new Audio(audioUrl);
     player.volume = 1;
+    player.playbackRate = options?.rate ?? 1;
+    player.preservesPitch = options?.preservePitch ?? true;
     await new Promise<void>((resolve) => {
         const done = (): void => resolve();
         player?.addEventListener('ended', done, { once: true });

@@ -1,14 +1,13 @@
 import type { ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Volume2 } from 'lucide-react';
 
 import type { DialogueScene } from '@/common/contracts/dialogue';
 
 /**
- * 场景卡：设定、双方角色与参考句式。
+ * 场景卡：设定、双方角色与本课练习点（参考句式已移到右侧栏）。
  *
  * @param props.scene 场景卡。
- * @param props.onSpeak 朗读参考句式。
+ * @param props.onSpeak 朗读练习点里的词句。
  * @param props.actions 场景信息区右上角的操作按钮（重置对话、返回列表）。
  */
 export default function SceneCardView({
@@ -43,26 +42,7 @@ export default function SceneCardView({
                 </div>
             </div>
 
-            <div>
-                <div className="mb-1.5 text-xs text-muted-foreground">{t('dialogue.targets')}</div>
-                <div className="flex flex-wrap gap-1.5">
-                    {scene.targetExpressions.map((item) => (
-                        <button
-                            key={item.en}
-                            type="button"
-                            onClick={() => onSpeak(item.en)}
-                            className="group flex items-center gap-1.5 rounded-full border border-border/60 px-2.5 py-1 text-xs text-foreground/80 transition-colors hover:border-border hover:text-foreground"
-                        >
-                            <span>{item.en}</span>
-                            {/* 取自练习记录的台词可能没有译文，空着就不占位，避免出现悬空的括号 */}
-                            {item.zh.trim() !== '' && (
-                                <span className="text-muted-foreground">{item.zh}</span>
-                            )}
-                            <Volume2 className="h-3 w-3 opacity-0 transition-opacity group-hover:opacity-100" />
-                        </button>
-                    ))}
-                </div>
-            </div>
+            {/* 参考句式已移到右侧栏顶部 */}
 
             {/* 本课练习点：来自场景生成时的核心词句与语法，旧场景没有这一块 */}
             {scene.practice && (
