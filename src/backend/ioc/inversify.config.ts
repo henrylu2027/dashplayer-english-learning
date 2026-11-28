@@ -164,6 +164,8 @@ import type FfmpegGateway from '@/backend/services/gateways/media/FfmpegGateway'
 import FfmpegGatewayImpl from '@/backend/infrastructure/media/ffmpeg/FfmpegGatewayImpl';
 import type WordsRepository from '@/backend/services/repositories/WordsRepository';
 import WordsRepositoryImpl from '@/backend/infrastructure/db/repositories/WordsRepositoryImpl';
+import type WordOriginRepository from '@/backend/services/repositories/WordOriginRepository';
+import WordOriginRepositoryImpl from '@/backend/infrastructure/db/repositories/WordOriginRepositoryImpl';
 import type DpTaskRepository from '@/backend/services/repositories/DpTaskRepository';
 import DpTaskRepositoryImpl from '@/backend/infrastructure/db/repositories/DpTaskRepositoryImpl';
 import type TranscriptionTaskRepository from '@/backend/services/repositories/TranscriptionTaskRepository';
@@ -274,6 +276,7 @@ container.bind<SherpaOnnxTtsCli>(TYPES.SherpaOnnxTtsCli).to(SherpaOnnxTtsCli).in
 container.bind<SherpaTtsModelService>(TYPES.SherpaTtsModelService).to(SherpaTtsModelServiceImpl).inSingletonScope();
 container.bind<LocalTtsService>(TYPES.LocalTtsService).to(LocalTtsServiceImpl).inSingletonScope();
 container.bind<WordsRepository>(TYPES.WordsRepository).to(WordsRepositoryImpl).inSingletonScope();
+container.bind<WordOriginRepository>(TYPES.WordOriginRepository).to(WordOriginRepositoryImpl).inSingletonScope();
 container.bind<DpTaskRepository>(TYPES.DpTaskRepository).to(DpTaskRepositoryImpl).inSingletonScope();
 container.bind<TranscriptionTaskRepository>(TYPES.TranscriptionTaskRepository).to(TranscriptionTaskRepositoryImpl).inSingletonScope();
 container.bind<RepairTaskRepository>(TYPES.RepairTaskRepository).to(RepairTaskRepositoryImpl).inSingletonScope();

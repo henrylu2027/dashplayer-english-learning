@@ -15,6 +15,7 @@ import {
 
 import type { ShadowingAttemptSource, ShadowingScoreVO } from '@/common/contracts/shadowing';
 import type { SrsOverview } from '@/common/contracts/srs';
+import type { WordOriginInput } from '@/common/contracts/vocabulary';
 import { SRS_PASS_SCORE } from '@/common/contracts/srs';
 import UrlUtil from '@/common/utils/UrlUtil';
 import PageHeader from '@/fronted/components/shared/common/PageHeader';
@@ -453,9 +454,20 @@ export default function OriginalShadowingPage() {
         }
         setSavingWords(true);
         let added = 0;
+        // 生词出处：当前选中的原句
+        const origin: WordOriginInput | undefined = selected
+            ? {
+                module: 'original',
+                sentence: selected.text,
+                videoKey: selected.source.kind === 'video' ? selected.source.videoKey : undefined,
+                sentenceIndex: selected.source.kind === 'video' ? selected.source.sentenceIndex : undefined,
+                videoPath: selected.source.kind === 'video' ? selected.source.videoPath : undefined,
+                subtitlePath: selected.source.kind === 'video' ? selected.source.subtitlePath : undefined,
+            }
+            : undefined;
         try {
             for (const word of words) {
-                const response = await videoLearningApi.favoriteWord(word);
+                const response = await videoLearningApi.favoriteWord(word, undefined, origin);
                 if (response.success) {
                     added += 1;
                 }

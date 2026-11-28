@@ -15,6 +15,12 @@ import { loadDefaultVocabulary } from '@/backend/utils/defaultVocabulary';
 import type SubtitleService from '@/backend/services/SubtitleService';
 import { lemmatizeWord } from '@/backend/utils/language/VocabularyMatcher';
 import { concurrency } from '@/backend/utils/concurrency';
+import type SrsService from '@/backend/services/SrsService';
+import type WordOriginRepository from '@/backend/services/repositories/WordOriginRepository';
+import type { LearnWordData, VocabularyWordVO, WordOrigin, WordOriginInput } from '@/common/contracts/vocabulary';
+import type { ShadowingAttemptSource } from '@/common/contracts/shadowing';
+import type { SrsSourceModule } from '@/common/contracts/srs';
+import { buildSrsCardKey } from '@/backend/services/shadowing/ShadowingSource';
 
 export interface GetAllWordsParams {
     search?: string;
@@ -22,7 +28,7 @@ export interface GetAllWordsParams {
 
 export interface GetAllWordsResult {
     success: boolean;
-    data?: unknown[];
+    data?: VocabularyWordVO[];
     error?: string;
 }
 
@@ -86,6 +92,13 @@ export interface GenerateDefinitionResult {
     error?: string;
 }
 
+/** 「学会了」结果。 */
+export interface LearnWordResult {
+    success: boolean;
+    data?: LearnWordData;
+    error?: string;
+}
+
 export default interface VocabularyService {
     getAllWords(params: GetAllWordsParams): Promise<GetAllWordsResult>;
     exportTemplate(): Promise<ExportTemplateResult>;
@@ -101,8 +114,21 @@ export default interface VocabularyService {
      *
      * @param word 用户点击的单词原文（可能是复数、时态等变体）。
      * @param translate 调用方已有的释义文本；为空时由 AI 生成。
+     * @param origin 收藏时所在的句子与来源；已存在的词也会补记出处。
      */
-    favoriteWord(word: string, translate?: string): Promise<FavoriteWordResult>;
+    favoriteWord(word: string, translate?: string, origin?: WordOriginInput): Promise<FavoriteWordResult>;
+    /**
+     * 标记「学会了」：把词连同出处句做成语境卡送进间隔复习。
+     *
+     * 行为说明：
+     * - 有出处时用出处句建卡，目标词写入卡片；同一句已有卡则只补目标词；
+     * - 没有出处（如导入的默认词表）时用词本身建卡，交给复习页的认词形态；
+     * - 无论是否排队成功，都会记录 learned_at。
+     *
+     * @param word 词条原文。
+     * @returns 入池结果。
+     */
+    learnWord(word: string): Promise<LearnWordResult>;
     /**
      * 编辑单词与释义；单词变化时同步迁移片段关联。
      */
@@ -133,6 +159,12 @@ export class VocabularyServiceImpl implements VocabularyService {
 
     @inject(TYPES.WordsRepository)
     private wordsRepository!: WordsRepository;
+
+    @inject(TYPES.WordOriginRepository)
+    private wordOriginRepository!: WordOriginRepository;
+
+    @inject(TYPES.SrsService)
+    private srsService!: SrsService;
 
     @inject(TYPES.WordMatchService)
     private wordMatchService!: WordMatchService;
@@ -249,7 +281,10 @@ export class VocabularyServiceImpl implements VocabularyService {
 
     async getAllWords(params: GetAllWordsParams = {}): Promise<GetAllWordsResult> {
         try {
-            const wordsResult = await this.wordsRepository.getAll({ search: params.search });
+            const [wordsResult, origins] = await Promise.all([
+                this.wordsRepository.getAll({ search: params.search }),
+                this.wordOriginRepository.listLatestByWord(),
+            ]);
 
             return {
                 success: true,
@@ -258,7 +293,9 @@ export class VocabularyServiceImpl implements VocabularyService {
                     word: word.word,
                     translate: word.translate || '',
                     created_at: word.created_at,
-                    updated_at: word.updated_at
+                    updated_at: word.updated_at,
+                    learnedAt: word.learned_at ?? null,
+                    origin: origins.get(word.word.toLowerCase()) ?? null,
                 }))
             };
         } catch (error) {
@@ -352,7 +389,16 @@ export class VocabularyServiceImpl implements VocabularyService {
             }
 
             const existingWords = await this.wordsRepository.getAll();
-            const importedWords = this.parseImportedWords(worksheet);
+            // 导入是整表覆盖，但「学会了」属于学习进度，不能因为换词表被清掉
+            const learnedAtByWord = new Map(
+                existingWords
+                    .filter((item) => item.learned_at !== null)
+                    .map((item) => [item.word, item.learned_at] as const),
+            );
+            const importedWords = this.parseImportedWords(worksheet).map((item) => ({
+                ...item,
+                learned_at: learnedAtByWord.get(item.word) ?? null,
+            }));
             const existingWordSet = new Set(existingWords.map((item) => item.word));
             const importedWordSet = new Set(importedWords.map((item) => item.word));
             const retainedCount = importedWords.filter((item) => existingWordSet.has(item.word)).length;
@@ -402,7 +448,7 @@ export class VocabularyServiceImpl implements VocabularyService {
      * @param translate 调用方已有的释义文本；为空时由 AI 生成。
      * @returns 收藏结果；成功时携带入库单词与释义。
      */
-    async favoriteWord(word: string, translate?: string): Promise<FavoriteWordResult> {
+    async favoriteWord(word: string, translate?: string, origin?: WordOriginInput): Promise<FavoriteWordResult> {
         try {
             const input = word?.trim() ?? '';
             if (!input) {
@@ -415,6 +461,8 @@ export class VocabularyServiceImpl implements VocabularyService {
             const lemma = lemmatizeWord(input);
             const existing = await this.wordsRepository.findByWord(lemma);
             if (existing) {
+                // 已存在的词也可能从新语境被收藏：出处照记，不重复入库。
+                await this.recordOrigin(lemma, origin);
                 return {
                     success: true,
                     data: {
@@ -433,6 +481,7 @@ export class VocabularyServiceImpl implements VocabularyService {
                 // 并发收藏同一词的不同变体时会撞唯一约束；重新查到记录即转为已存在返回。
                 const raced = await this.wordsRepository.findByWord(lemma);
                 if (raced) {
+                    await this.recordOrigin(lemma, origin);
                     return {
                         success: true,
                         data: {
@@ -444,6 +493,7 @@ export class VocabularyServiceImpl implements VocabularyService {
                 }
                 throw insertError;
             }
+            await this.recordOrigin(lemma, origin);
             this.invalidateVocabularyCaches();
 
             return {
@@ -507,6 +557,7 @@ export class VocabularyServiceImpl implements VocabularyService {
             await this.wordsRepository.updateByWord(oldWord, { word: newWord, translate });
             if (newWord !== oldWord) {
                 await this.clipWordRepository.renameWord(oldWord, newWord);
+                await this.wordOriginRepository.renameWord(oldWord, newWord);
             }
             this.invalidateVocabularyCaches();
 
@@ -543,6 +594,7 @@ export class VocabularyServiceImpl implements VocabularyService {
             const lemma = lemmatizeWord(input);
             await this.wordsRepository.deleteByWord(lemma);
             await this.clipWordRepository.deleteByWord(lemma);
+            await this.wordOriginRepository.deleteByWord(lemma);
             this.invalidateVocabularyCaches();
 
             return { success: true, data: { word: lemma } };
@@ -553,6 +605,118 @@ export class VocabularyServiceImpl implements VocabularyService {
                 error: error instanceof Error ? error.message : '删除单词失败'
             };
         }
+    }
+
+    /**
+     * 标记「学会了」并把语境送进间隔复习。
+     *
+     * 行为说明：
+     * - 有出处时用出处句做语境卡，目标词写入卡片；同一句已有卡只补目标词；
+     * - 没有出处时用词本身建卡，交给复习页的认词形态；
+     * - 入池受每日上限约束，排队中也算已学会。
+     *
+     * @param word 词条原文（可能是变体）。
+     * @returns 入池结果。
+     */
+    async learnWord(word: string): Promise<LearnWordResult> {
+        try {
+            const input = word?.trim() ?? '';
+            if (!input) {
+                return { success: false, error: '单词不能为空' };
+            }
+            const lemma = lemmatizeWord(input);
+            const origin = await this.wordOriginRepository.findPreferred(lemma);
+            const hasContext = Boolean(origin?.sentence?.trim());
+            const referenceText = hasContext ? origin!.sentence.trim() : lemma;
+            const source: ShadowingAttemptSource = hasContext
+                ? this.originToSource(origin!)
+                : { kind: 'free' };
+
+            const ingested = await this.srsService.ingest({
+                referenceText,
+                source,
+                module: 'vocabulary',
+                word: lemma,
+            });
+            await this.wordsRepository.markLearned(lemma, Date.now());
+            this.logger.info('word learned', {
+                word: lemma,
+                hasContext,
+                queued: ingested.queued,
+                cardId: ingested.card?.id ?? null,
+            });
+            return {
+                success: true,
+                data: {
+                    word: lemma,
+                    hasContext,
+                    queued: ingested.queued,
+                    cardId: ingested.card?.id ?? null,
+                },
+            };
+        } catch (error) {
+            this.logger.error('标记学会失败', { error });
+            return {
+                success: false,
+                error: error instanceof Error ? error.message : '标记学会失败',
+            };
+        }
+    }
+
+    /**
+     * 记录一条生词出处；非法或空内容直接跳过，不影响收藏本身。
+     *
+     * @param word 词条原形。
+     * @param origin 调用方提交的出处。
+     */
+    private async recordOrigin(word: string, origin?: WordOriginInput): Promise<void> {
+        if (!origin) {
+            return;
+        }
+        const sentence = origin.sentence?.trim() ?? '';
+        if (!sentence || !ORIGIN_MODULES.includes(origin.module)) {
+            return;
+        }
+        const source = this.originToSource(origin);
+        let sentenceKey: string;
+        try {
+            sentenceKey = buildSrsCardKey(sentence, source);
+        } catch {
+            // 句子没有可复习的词时不记出处，避免拖垮收藏
+            return;
+        }
+        await this.wordOriginRepository.add({
+            word,
+            module: origin.module,
+            sentence,
+            sentenceKey,
+            videoKey: source.kind === 'video' ? source.videoKey : undefined,
+            sentenceIndex: source.kind === 'video' ? source.sentenceIndex : undefined,
+            videoPath: source.kind === 'video' ? source.videoPath : undefined,
+            subtitlePath: source.kind === 'video' ? source.subtitlePath : undefined,
+            createdAt: Date.now(),
+        });
+    }
+
+    /**
+     * 把出处还原为跟读来源；缺视频键或句序号时退回自由文本。
+     *
+     * @param origin 出处。
+     * @returns 跟读来源。
+     */
+    private originToSource(
+        origin: Pick<WordOrigin | WordOriginInput, 'videoKey' | 'sentenceIndex' | 'videoPath' | 'subtitlePath'>,
+    ): ShadowingAttemptSource {
+        if (origin.videoKey && typeof origin.sentenceIndex === 'number') {
+            return {
+                kind: 'video',
+                videoKey: origin.videoKey,
+                sentenceIndex: origin.sentenceIndex,
+                videoPath: origin.videoPath,
+                subtitlePath: origin.subtitlePath,
+            };
+        }
+        return { kind: 'free' };
     }
 
     /**
@@ -651,3 +815,6 @@ export class VocabularyServiceImpl implements VocabularyService {
 
 /** 释义生成请求超时时间（毫秒）。 */
 const DEFINITION_REQUEST_TIMEOUT_MS = 30_000;
+
+/** 合法的出处来源模块；其余值直接丢弃，避免脏数据进库。 */
+const ORIGIN_MODULES: readonly SrsSourceModule[] = ['player', 'original', 'practice', 'dialogue', 'vocabulary'];

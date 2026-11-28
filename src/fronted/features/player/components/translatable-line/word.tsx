@@ -24,6 +24,8 @@ import { usePlayer } from '@/fronted/features/player/playerStore';
 import useDictionaryStream, { createDictionaryRequestId } from '@/fronted/features/player/dictionaryStore';
 import { playerApi } from '@/fronted/features/player/playerApi';
 import { videoLearningApi } from '@/fronted/features/video-learning/videoLearningApi';
+import useFile from '@/fronted/features/file-browser/fileStore';
+import type { WordOriginInput } from '@/common/contracts/vocabulary';
 
 const logger = getRendererLogger('Word');
 
@@ -72,6 +74,12 @@ export interface WordParam {
     pop: boolean;
     requestPop: () => void;
     show: boolean;
+    /** 该词所在的整句原文；收藏时作为生词出处。 */
+    sentenceText?: string;
+    /** 该句所在字幕的内容哈希。 */
+    fileHash?: string;
+    /** 该句在字幕里的序号。 */
+    sentenceIndex?: number;
     alwaysDark?: boolean;
     classNames?: {
         word?: string;    // 单词文本容器（非弹层）
@@ -103,8 +111,22 @@ export const getBox = (ele: HTMLElement): Feature<Polygon> => {
  * 渲染单个字幕原文词，并使用 lemma 判断生词高亮；词典查询仍传递原文。
  * @param props 字幕词原文、lemma 及交互状态。
  */
-const Word = ({word, original, lemma, pop, requestPop, show, alwaysDark, classNames}: WordParam) => {
+const Word = ({
+    word,
+    original,
+    lemma,
+    pop,
+    requestPop,
+    show,
+    sentenceText,
+    fileHash,
+    sentenceIndex,
+    alwaysDark,
+    classNames,
+}: WordParam) => {
     const pause = usePlayer((s) => s.pause);
+    const videoPath = useFile((s) => s.videoPath);
+    const subtitlePath = useFile((s) => s.subtitlePath);
     const vocabularyStore = useVocabulary();
     const { t } = useTranslation('common');
     const [hovered, setHovered] = useState(false);
@@ -188,6 +210,27 @@ const Word = ({word, original, lemma, pop, requestPop, show, alwaysDark, classNa
     };
 
     /**
+     * 把当前句作为生词出处；没有整句上下文时返回 undefined。
+     *
+     * 字幕句只有同时拿到内容哈希与句序号才算视频出处，否则按自由文本记。
+     */
+    const buildWordOrigin = (): WordOriginInput | undefined => {
+        const sentence = sentenceText?.trim();
+        if (!sentence) {
+            return undefined;
+        }
+        const hasVideo = Boolean(fileHash) && typeof sentenceIndex === 'number';
+        return {
+            module: 'player',
+            sentence,
+            videoKey: hasVideo ? fileHash : undefined,
+            sentenceIndex: hasVideo ? sentenceIndex : undefined,
+            videoPath: hasVideo ? videoPath ?? undefined : undefined,
+            subtitlePath: hasVideo ? subtitlePath ?? undefined : undefined,
+        };
+    };
+
+    /**
      * 切换收藏：未收藏时加入词汇工坊，已收藏时从词表移除。
      *
      * 行为说明：
@@ -222,7 +265,11 @@ const Word = ({word, original, lemma, pop, requestPop, show, alwaysDark, classNa
                 return;
             }
 
-            const result = await videoLearningApi.favoriteWord(original, buildFavoriteTranslate(dictionaryResponse));
+            const result = await videoLearningApi.favoriteWord(
+                original,
+                buildFavoriteTranslate(dictionaryResponse),
+                buildWordOrigin(),
+            );
             if (result.success && result.data) {
                 vocabularyStore.addVocabularyWords([result.data.word]);
                 setFavoriteState('saved');

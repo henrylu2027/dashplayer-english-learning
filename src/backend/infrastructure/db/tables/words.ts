@@ -13,6 +13,8 @@ export const words = sqliteTable('dp_words', {
      * 历史遗留字段；新逻辑请勿继续依赖。
      */
     note: text('note'),
+    /** 点击「学会了」的时间，epoch 毫秒；从未学会为 null。 */
+    learned_at: integer('learned_at', { mode: 'number' }),
     created_at: text('created_at')
         .notNull()
         .default(sql`CURRENT_TIMESTAMP`),

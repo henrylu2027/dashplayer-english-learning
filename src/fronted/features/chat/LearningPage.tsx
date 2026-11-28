@@ -15,6 +15,8 @@ import { getTtsUrl, playAudioUrl } from '@/fronted/infrastructure/audio/AudioPla
 import { getRendererLogger } from '@/fronted/log/simple-logger';
 import TimeUtil from '@/common/utils/TimeUtil';
 import type { SentenceVocabularyVO, SentenceWordEntry } from '@/common/types/vo/SentenceVocabularyVO';
+import useFile from '@/fronted/features/file-browser/fileStore';
+import type { WordOriginInput } from '@/common/contracts/vocabulary';
 
 const logger = getRendererLogger('LearningPage');
 
@@ -62,6 +64,10 @@ export default function LearningPage() {
         () => (anchorIndex === null ? undefined : sentences.find((sentence) => sentence.index === anchorIndex)),
         [anchorIndex, sentences]
     );
+
+    // 视频/字幕路径用于把整句出处写进词汇工坊
+    const videoPath = useFile((state) => state.videoPath);
+    const subtitlePath = useFile((state) => state.subtitlePath);
 
     const sentence: LearningSentence = useMemo(() => ({
         en: topicText,
@@ -131,6 +137,23 @@ export default function LearningPage() {
      * 说明：收藏时把本地词典的释义一并入库，避免后端再调用一次词典；
      * 取消收藏按基础形态删除，因为词表命中可能来自变体形态。
      */
+    /** 收藏时把整句作为出处；没有视频句信息时按自由文本记。 */
+    const buildWordOrigin = useCallback((): WordOriginInput | undefined => {
+        const text = topicText.trim();
+        if (!text) {
+            return undefined;
+        }
+        const hasVideo = Boolean(topicLine?.fileHash) && typeof topicLine?.index === 'number';
+        return {
+            module: 'player',
+            sentence: text,
+            videoKey: hasVideo ? topicLine!.fileHash : undefined,
+            sentenceIndex: hasVideo ? topicLine!.index : undefined,
+            videoPath: hasVideo ? videoPath ?? undefined : undefined,
+            subtitlePath: hasVideo ? subtitlePath ?? undefined : undefined,
+        };
+    }, [topicText, topicLine, videoPath, subtitlePath]);
+
     const toggleFavorite = useCallback(async (word: string, meaning: string) => {
         const favorited = vocabulary.isVocabularyWord(word);
         try {
@@ -149,7 +172,7 @@ export default function LearningPage() {
                 toast.success(t('wordUnfavorited'));
                 return;
             }
-            const result = await videoLearningApi.favoriteWord(word, meaning);
+            const result = await videoLearningApi.favoriteWord(word, meaning, buildWordOrigin());
             if (!result.success || !result.data) {
                 toast.error(result.error || t('favoriteWordFailed'));
                 return;
@@ -160,7 +183,7 @@ export default function LearningPage() {
             logger.error('failed to toggle favorite word', { error: error instanceof Error ? error.message : error });
             toast.error(favorited ? t('unfavoriteWordFailed') : t('favoriteWordFailed'));
         }
-    }, [t, vocabulary]);
+    }, [t, vocabulary, buildWordOrigin]);
 
     const isFavorite = useCallback((word: string) => vocabulary.isVocabularyWord(word), [vocabulary]);
 

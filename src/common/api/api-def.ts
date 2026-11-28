@@ -26,6 +26,7 @@ import type {
 } from '@/common/contracts/playback-repair';
 
 import type {Tag} from '@/common/contracts/tag';
+import type { LearnWordData, VocabularyWordVO, WordOriginInput } from '@/common/contracts/vocabulary';
 import type {ClipQuery, SimpleClipQuery} from '@/common/api/dto';
 import type {ClipMeta, OssBaseMeta} from '@/common/types/clipMeta';
 import type WatchHistoryVO from '@/common/types/WatchHistoryVO';
@@ -438,7 +439,7 @@ interface TagDef {
 interface VocabularyDef {
     'vocabulary/get-all': {
         params: { search?: string; page?: number; pageSize?: number },
-        return: { success: boolean; data?: unknown[]; error?: string }
+        return: { success: boolean; data?: VocabularyWordVO[]; error?: string }
     };
     'vocabulary/export-template': {
         params: void,
@@ -449,12 +450,16 @@ interface VocabularyDef {
         return: { success: boolean; message?: string; error?: string }
     };
     'vocabulary/favorite': {
-        params: { word: string; translate?: string },
+        params: { word: string; translate?: string; origin?: WordOriginInput },
         return: {
             success: boolean;
             data?: { word: string; translate: string; alreadyExists: boolean };
             error?: string
         }
+    };
+    'vocabulary/learn': {
+        params: { word: string },
+        return: { success: boolean; data?: LearnWordData; error?: string }
     };
     'vocabulary/update': {
         params: { oldWord: string; word: string; translate: string },

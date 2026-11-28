@@ -5,6 +5,7 @@ import type VocabularyService from '@/backend/services/VocabularyService';
 import { type GetAllWordsParams, type UpdateWordParams } from '@/backend/services/VocabularyService';
 import type SentenceVocabularyService from '@/backend/services/SentenceVocabularyService';
 import type { SentenceVocabularyVO } from '@/common/types/vo/SentenceVocabularyVO';
+import type { WordOriginInput } from '@/common/contracts/vocabulary';
 import registerRoute from '@/backend/controllers/ipc/registerRoute';
 
 @injectable()
@@ -24,8 +25,18 @@ export default class VocabularyController implements Controller {
         return this.vocabularyService.importWords(params.filePath);
     }
 
-    public async favoriteWord(params: { word: string; translate?: string }) {
-        return this.vocabularyService.favoriteWord(params.word, params.translate);
+    public async favoriteWord(params: { word: string; translate?: string; origin?: WordOriginInput }) {
+        return this.vocabularyService.favoriteWord(params.word, params.translate, params.origin);
+    }
+
+    /**
+     * 标记「学会了」：以出处句为语境送进间隔复习。
+     *
+     * @param params.word 词条原文。
+     * @returns 入池结果。
+     */
+    public async learnWord(params: { word: string }) {
+        return this.vocabularyService.learnWord(params.word);
     }
 
     public async updateWord(params: UpdateWordParams) {
@@ -57,6 +68,7 @@ export default class VocabularyController implements Controller {
         registerRoute('vocabulary/export-template', () => this.exportTemplate());
         registerRoute('vocabulary/import', (p) => this.importWords(p));
         registerRoute('vocabulary/favorite', (p) => this.favoriteWord(p));
+        registerRoute('vocabulary/learn', (p) => this.learnWord(p));
         registerRoute('vocabulary/update', (p) => this.updateWord(p));
         registerRoute('vocabulary/delete', (p) => this.deleteWord(p));
         registerRoute('vocabulary/generate-definition', (p) => this.generateDefinition(p));

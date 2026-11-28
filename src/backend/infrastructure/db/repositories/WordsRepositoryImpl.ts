@@ -118,4 +118,20 @@ export default class WordsRepositoryImpl implements WordsRepository {
             .where(this.wordEquals(word))
             .run();
     }
+
+    /**
+     * 记录「学会了」时间；不存在的词静默忽略，由界面决定是否提示。
+     *
+     * @param word 词条原形。
+     * @param learnedAt 学会时间，epoch 毫秒。
+     */
+    public async markLearned(word: string, learnedAt: number): Promise<void> {
+        db.update(words)
+            .set({
+                learned_at: learnedAt,
+                updated_at: new Date().toISOString(),
+            })
+            .where(this.wordEquals(word))
+            .run();
+    }
 }

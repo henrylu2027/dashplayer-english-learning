@@ -21,6 +21,7 @@ import type {
     RetellResult,
 } from '@/common/contracts/practice';
 import type { ShadowingAttemptSource, ShadowingWordStatus } from '@/common/contracts/shadowing';
+import type { WordOriginInput } from '@/common/contracts/vocabulary';
 import UrlUtil from '@/common/utils/UrlUtil';
 import PageHeader from '@/fronted/components/shared/common/PageHeader';
 import { Button } from '@/fronted/components/ui/button';
@@ -374,9 +375,20 @@ export default function PracticePage() {
         }
         setSavingWords(true);
         let added = 0;
+        // 生词出处：当前正在练的这句
+        const origin: WordOriginInput | undefined = current
+            ? {
+                module: 'practice',
+                sentence: current.text,
+                videoKey: current.source.kind === 'video' ? current.source.videoKey : undefined,
+                sentenceIndex: current.source.kind === 'video' ? current.source.sentenceIndex : undefined,
+                videoPath: current.source.kind === 'video' ? current.source.videoPath : undefined,
+                subtitlePath: current.source.kind === 'video' ? current.source.subtitlePath : undefined,
+            }
+            : undefined;
         try {
             for (const word of problemWords) {
-                const response = await videoLearningApi.favoriteWord(word);
+                const response = await videoLearningApi.favoriteWord(word, undefined, origin);
                 if (response.success) {
                     added += 1;
                 }

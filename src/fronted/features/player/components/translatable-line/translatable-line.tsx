@@ -86,6 +86,7 @@ const TranslatableLine = ({
                 if (part.isWord) {
                     return [gapElement, <Word key={partId} word={part.content} original={part.content} lemma={part.lemma}
                         pop={popELe === partId} requestPop={() => handleRequestPop(partId)} show={show}
+                        sentenceText={text} fileHash={sentence.fileHash} sentenceIndex={sentence.index}
                         alwaysDark={hoverDark} classNames={wordClassNames} />];
                 }
                 return [gapElement, <span className={cn('whitespace-pre-wrap', !show && 'text-transparent')} key={partId}>{part.content}</span>];

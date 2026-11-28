@@ -1,4 +1,5 @@
 import type { SimpleClipQuery } from '@/common/api/dto';
+import type { WordOriginInput } from '@/common/contracts/vocabulary';
 import type { ClipMeta } from '@/common/types/clipMeta';
 import { backendClient } from '@/fronted/infrastructure/electron/backendClient';
 import { requestVideoThumbnail } from '@/fronted/lib/video-thumbnail';
@@ -64,9 +65,19 @@ export const videoLearningApi = {
      *
      * @param word 用户点击的单词原文（可能是变体）。
      * @param translate 弹窗词典已查到的释义；提供时后端不再另行调用词典 AI。
+     * @param origin 收藏时所在的句子与来源；用于展示出处与生成语境卡。
      * @returns 收藏结果，成功时携带入库单词与释义。
      */
-    favoriteWord: (word: string, translate?: string) => backendClient.call('vocabulary/favorite', { word, translate }),
+    favoriteWord: (word: string, translate?: string, origin?: WordOriginInput) =>
+        backendClient.call('vocabulary/favorite', { word, translate, origin }),
+
+    /**
+     * 标记「学会了」：以出处句为语境送进间隔复习。
+     *
+     * @param word 词条原文。
+     * @returns 入池结果。
+     */
+    learnWord: (word: string) => backendClient.call('vocabulary/learn', { word }),
 
     /**
      * 编辑单词与释义；单词本身是业务键，需用旧单词定位。

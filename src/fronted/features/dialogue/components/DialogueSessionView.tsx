@@ -14,7 +14,6 @@ import type {
 import { DIALOGUE_DIFFICULTIES } from '@/common/contracts/dialogue';
 import { Button } from '@/fronted/components/ui/button';
 import { practiceApi } from '@/fronted/features/practice/practiceApi';
-import { srsApi } from '@/fronted/features/srs/srsApi';
 import { videoLearningApi } from '@/fronted/features/video-learning/videoLearningApi';
 import { getTtsUrl, playAudioUrlAndWait } from '@/fronted/infrastructure/audio/AudioPlayer';
 import { getRendererLogger } from '@/fronted/log/simple-logger';
@@ -260,7 +259,7 @@ export default function DialogueSessionView({
      * @param words 待入库的词。
      * @returns 实际写入的条数。
      */
-    const saveVocab = useCallback(async (words: string[]): Promise<number> => {
+    const saveVocab = useCallback(async (words: string[], originSentence?: string): Promise<number> => {
         let added = 0;
         for (const word of words) {
             const trimmed = word.trim();
@@ -268,7 +267,13 @@ export default function DialogueSessionView({
                 continue;
             }
             try {
-                const response = await videoLearningApi.favoriteWord(trimmed);
+                const response = await videoLearningApi.favoriteWord(
+                    trimmed,
+                    undefined,
+                    originSentence?.trim()
+                        ? { module: 'dialogue', sentence: originSentence.trim() }
+                        : undefined,
+                );
                 if (response.success) {
                     added += 1;
                 }
@@ -342,7 +347,7 @@ export default function DialogueSessionView({
                         .map((item) => item.word.trim())
                         .filter((word) => /^[A-Za-z][A-Za-z'-]*$/.test(word)),
                 ];
-                void saveVocab(autoWords).then((added) => {
+                void saveVocab(autoWords, text).then((added) => {
                     if (added > 0) {
                         toast.success(t('dialogue.vocabAutoSaved', { count: added }));
                     }
@@ -386,7 +391,8 @@ export default function DialogueSessionView({
         }
         setSavingWords(true);
         try {
-            const added = await saveVocab(words);
+            const lastUserText = [...turns].reverse().find((turn) => turn.role === 'user')?.content;
+            const added = await saveVocab(words, lastUserText);
             toast.success(added > 0
                 ? t('practice.wordsAdded', { count: added })
                 : t('dialogue.wordsAlreadySaved'));
@@ -396,33 +402,42 @@ export default function DialogueSessionView({
     };
 
     const handleBatchWords = async (): Promise<void> => {
-        const words = new Set<string>();
-        for (const turn of evaluations) {
-            for (const word of turn.vocab) {
-                if (word.trim()) {
-                    words.add(word.trim());
-                }
-            }
-            for (const item of turn.errorList) {
-                const word = item.word.trim();
-                if (/^[A-Za-z][A-Za-z'-]*$/.test(word)) {
-                    words.add(word);
-                }
-            }
-        }
-        if (words.size === 0) {
+        // 按回合取词：每个词的出处就是学习者说的那句
+        const userTurns = turns.filter((turn) => turn.role === 'user' && turn.evaluation);
+        if (userTurns.length === 0) {
             toast.success(t('practice.noProblemWords'));
             return;
         }
         setSavingBatch(true);
         let added = 0;
         try {
-            for (const word of words) {
-                const response = await videoLearningApi.favoriteWord(word);
-                if (response.success) {
-                    added += 1;
+            for (const turn of userTurns) {
+                const turnEvaluation = turn.evaluation;
+                if (!turnEvaluation) {
+                    continue;
                 }
-                await srsApi.addCard({ referenceText: word, source: { kind: 'free' } });
+                const words = new Set<string>();
+                for (const word of turnEvaluation.vocab) {
+                    if (word.trim()) {
+                        words.add(word.trim());
+                    }
+                }
+                for (const item of turnEvaluation.errorList) {
+                    const word = item.word.trim();
+                    if (/^[A-Za-z][A-Za-z'-]*$/.test(word)) {
+                        words.add(word);
+                    }
+                }
+                for (const word of words) {
+                    const response = await videoLearningApi.favoriteWord(word, undefined, {
+                        module: 'dialogue',
+                        sentence: turn.content,
+                    });
+                    if (response.success) {
+                        added += 1;
+                    }
+                    await videoLearningApi.learnWord(word);
+                }
             }
             toast.success(t('dialogue.batchWordsDone', { count: added }));
         } catch (error) {
