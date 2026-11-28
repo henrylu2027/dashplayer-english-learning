@@ -3,6 +3,7 @@ import { inject, injectable } from 'inversify';
 import TYPES from '@/backend/ioc/types';
 import { getMainLogger } from '@/backend/infrastructure/logger';
 import type { ShadowingAttemptSource } from '@/common/contracts/shadowing';
+import { SRS_PASS_SCORE } from '@/common/contracts/srs';
 import type {
     DictationRequest,
     DictationResult,
@@ -15,6 +16,7 @@ import type {
 } from '@/common/contracts/practice';
 import type RecordedSpeechService from '@/backend/services/speech/RecordedSpeechService';
 import type SentenceAudioService from '@/backend/services/SentenceAudioService';
+import type SrsService from '@/backend/services/SrsService';
 import type OllamaGrader from '@/backend/services/practice/OllamaGrader';
 import type { PracticeGrade } from '@/backend/services/practice/OllamaGrader';
 import type PronunciationService from '@/backend/services/practice/PronunciationService';
@@ -94,6 +96,9 @@ export class PracticeServiceImpl implements PracticeService {
     @inject(TYPES.SentenceAudioService)
     private sentenceAudioService!: SentenceAudioService;
 
+    @inject(TYPES.SrsService)
+    private srsService!: SrsService;
+
     @inject(TYPES.OllamaGrader)
     private ollamaGrader!: OllamaGrader;
 
@@ -123,6 +128,7 @@ export class PracticeServiceImpl implements PracticeService {
             correctWordCount: alignment.correctWordCount,
             accuracy,
         });
+        await this.ingestToReview(referenceText, source, accuracy);
         const grade = await this.gradeQuietly({
             referenceText,
             learnerText: typedText,
@@ -186,6 +192,7 @@ export class PracticeServiceImpl implements PracticeService {
             score: coverage,
             wordFeedback: feedback,
         });
+        await this.ingestToReview(referenceText, source, coverage);
         this.logger.info('retell checked', {
             attemptId: attempt.id,
             job,
@@ -214,6 +221,32 @@ export class PracticeServiceImpl implements PracticeService {
             pronunciationScore: pronunciation?.score ?? grade.pronunciationScore,
             pronunciationWords: pronunciation?.words ?? [],
         };
+    }
+
+    /**
+     * 把本次练习的句子送进复习池；未达标进到期区，失败只记日志不影响练习结果。
+     *
+     * @param referenceText 参考句。
+     * @param source 句子来源。
+     * @param score 本次练习得分。
+     */
+    private async ingestToReview(
+        referenceText: string,
+        source: ShadowingAttemptSource,
+        score: number,
+    ): Promise<void> {
+        try {
+            await this.srsService.ingest({
+                referenceText,
+                source,
+                module: 'practice',
+                failed: score < SRS_PASS_SCORE,
+            });
+        } catch (error) {
+            this.logger.warn('srs ingest failed after practice', {
+                error: error instanceof Error ? error.message : String(error),
+            });
+        }
     }
 
     /**

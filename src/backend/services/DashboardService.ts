@@ -76,7 +76,7 @@ export class DashboardServiceImpl implements DashboardService {
             recentAttempts,
         ] = await Promise.all([
             // 列表只取一条，计数仍是全量；学习台只需要数字
-            this.srsCardRepository.overview(now, 1, 1),
+            this.srsCardRepository.overview(now, 1, 1, todayStart.getTime()),
             this.shadowingAttemptRepository.summarySince(todayStart.getTime()),
             this.shadowingAttemptRepository.dailyCountsSince(windowStart.getTime()),
             this.practiceAttemptRepository.summarySince(todayStart.getTime()),
@@ -122,6 +122,7 @@ export class DashboardServiceImpl implements DashboardService {
 
         return {
             dueReviewCount: overview.dueCount,
+            todayNewCardCount: overview.newCount,
             totalCardCount: overview.totalCount,
             todayAttemptCount: shadowToday.count,
             todayAverageScore: shadowToday.averageScore === null ? null : Math.round(shadowToday.averageScore),

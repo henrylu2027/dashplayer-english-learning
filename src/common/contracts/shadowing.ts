@@ -135,4 +135,9 @@ export interface ShadowingScoreRequest {
     mimeType: string;
     /** 本次跟读的句子来源；每次评分都会落库一条记录。 */
     source: ShadowingAttemptSource;
+    /**
+     * 学习来源模块；提供时把这次跟读的句子自动送进间隔复习。
+     * 复习页自己的跟读不传，避免把复习动作当成新学习。
+     */
+    ingestModule?: 'player' | 'original' | 'practice' | 'dialogue' | 'vocabulary';
 }

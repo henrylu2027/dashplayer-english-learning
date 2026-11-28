@@ -16,6 +16,12 @@ export const srsCard = sqliteTable('dp_srs_card', {
     video_path: text('video_path'),
     subtitle_path: text('subtitle_path'),
     reference_text: text('reference_text').notNull(),
+    /** 语境卡的目标词；普通句子卡为空。 */
+    word: text('word'),
+    /** 学习来源模块，逗号分隔（player/original/practice/dialogue/vocabulary）。 */
+    source_modules: text('source_modules').notNull().default(''),
+    /** 入池优先级：0 最薄弱、3 最靠后。 */
+    priority: integer('priority', { mode: 'number' }).notNull().default(2),
     stage: integer('stage', { mode: 'number' }).notNull().default(0),
     due_at: integer('due_at', { mode: 'number' }).notNull(),
     last_score: integer('last_score', { mode: 'number' }),

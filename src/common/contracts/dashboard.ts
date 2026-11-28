@@ -27,6 +27,8 @@ export interface DashboardDailyActivity {
 export interface DashboardSummary {
     /** 当前到期待复习的卡片数。 */
     dueReviewCount: number;
+    /** 今日新学（今天入池）的卡片数。 */
+    todayNewCardCount: number;
     /** 全部复习卡片数。 */
     totalCardCount: number;
     /** 今日跟读次数（含复习时的跟读）。 */

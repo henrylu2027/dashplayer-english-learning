@@ -8,7 +8,9 @@ import type {
     ShadowingScoreRequest,
     ShadowingScoreResponse,
 } from '@/common/contracts/shadowing';
+import { SRS_PASS_SCORE } from '@/common/contracts/srs';
 import type RecordedSpeechService from '@/backend/services/speech/RecordedSpeechService';
+import type SrsService from '@/backend/services/SrsService';
 import type ShadowingAttemptRepository from '@/backend/services/repositories/ShadowingAttemptRepository';
 import { scoreShadowing } from '@/backend/services/shadowing/ShadowingScorer';
 import { normalizeShadowingSource } from '@/backend/services/shadowing/ShadowingSource';
@@ -65,6 +67,9 @@ export class ShadowingServiceImpl implements ShadowingService {
     @inject(TYPES.ShadowingAttemptRepository)
     private shadowingAttemptRepository!: ShadowingAttemptRepository;
 
+    @inject(TYPES.SrsService)
+    private srsService!: SrsService;
+
     public async score(request: ShadowingScoreRequest): Promise<ShadowingScoreResponse> {
         const referenceText = request.referenceText.trim();
         const referenceWordCount = tokenizeForScoring(referenceText).length;
@@ -105,6 +110,21 @@ export class ShadowingServiceImpl implements ShadowingService {
             correctWordCount: result.correctWordCount,
             score: result.score,
         });
+        // 学习页的跟读自动进复习池；复习页自己的跟读不带模块，避免自循环
+        if (request.ingestModule) {
+            try {
+                await this.srsService.ingest({
+                    referenceText,
+                    source,
+                    module: request.ingestModule,
+                    failed: result.score < SRS_PASS_SCORE,
+                });
+            } catch (ingestError) {
+                this.logger.warn('srs ingest failed after shadowing', {
+                    error: ingestError instanceof Error ? ingestError.message : String(ingestError),
+                });
+            }
+        }
         return { result, attempt };
     }
 

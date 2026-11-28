@@ -10,6 +10,7 @@ import type ModelRoutingService from '@/backend/services/ModelRoutingService';
 import type LocalAiService from '@/backend/services/LocalAiService';
 import type ChatSessionService from '@/backend/services/ChatSessionService';
 import type RecordedSpeechService from '@/backend/services/speech/RecordedSpeechService';
+import type SrsService from '@/backend/services/SrsService';
 import type DialogueRepository from '@/backend/services/repositories/DialogueRepository';
 import {
     DIALOGUE_BACKENDS,
@@ -346,6 +347,9 @@ export class DialogueServiceImpl implements DialogueService {
     @inject(TYPES.LocalAiService)
     private localAiService!: LocalAiService;
 
+    @inject(TYPES.SrsService)
+    private srsService!: SrsService;
+
     @inject(TYPES.RecordedSpeechService)
     private recordedSpeechService!: RecordedSpeechService;
 
@@ -566,7 +570,29 @@ export class DialogueServiceImpl implements DialogueService {
             content,
             cardId: request.cardId ?? null,
         });
+        if (request.role === 'user') {
+            await this.ingestDialogueLine(content);
+        }
         return { turn };
+    }
+
+    /**
+     * 把学习者说过的一句送进复习池（对话句没有视频原声，用 TTS）。
+     *
+     * @param text 学习者台词。
+     */
+    private async ingestDialogueLine(text: string): Promise<void> {
+        try {
+            await this.srsService.ingest({
+                referenceText: text,
+                source: { kind: 'free' },
+                module: 'dialogue',
+            });
+        } catch (error) {
+            this.logger.warn('srs ingest failed after dialogue turn', {
+                error: error instanceof Error ? error.message : String(error),
+            });
+        }
     }
 
     public async replyTurn(request: DialogueReplyTurnRequest): Promise<DialogueReplyTurnResult> {
@@ -640,6 +666,7 @@ export class DialogueServiceImpl implements DialogueService {
             content: text,
             evaluation,
         });
+        await this.ingestDialogueLine(text);
         const assistantTurn = await this.dialogueRepository.appendTurn({
             sessionId: request.sessionId,
             role: 'assistant',

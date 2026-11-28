@@ -388,7 +388,7 @@ export default function OriginalShadowingPage() {
         stopAudio();
         setEvaluating(true);
         try {
-            const response = await recorded.submit(selected.text, selected.source);
+            const response = await recorded.submit(selected.text, selected.source, 'original');
             if (!response) {
                 return;
             }

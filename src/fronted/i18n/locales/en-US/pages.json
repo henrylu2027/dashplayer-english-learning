@@ -340,7 +340,15 @@
         "loadFailed": "Failed to load the review plan",
         "retry": "Retry",
         "sourceVideo": "Video",
-        "sourceFree": "Custom"
+        "sourceFree": "Custom",
+        "newTitle": "New today",
+        "newHint": "Added today; first review tomorrow. Preview only.",
+        "targetWord": "Target word",
+        "modulePlayer": "Player",
+        "moduleOriginal": "Shadowing",
+        "modulePractice": "Dictation",
+        "moduleDialogue": "Dialogue",
+        "moduleVocabulary": "Vocabulary"
     },
     "dashboard": {
         "title": "Dashboard",
@@ -392,6 +400,7 @@
         "moduleVocabulary": "{{count}} words",
         "moduleVocabularyEmpty": "No words yet",
         "moduleReview": "{{count}} due",
+        "moduleNewToday": "{{count}} new today",
         "moduleFavorite": "{{count}} clips",
         "moduleDubbing": "{{count}} dubbing projects",
         "moduleRepair": "{{count}} repair groups",

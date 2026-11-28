@@ -234,7 +234,9 @@ export default function DashboardPage() {
             {
                 key: 'review',
                 name: tn('reviewPlan'),
-                hint: t('dashboard.moduleReview', { count: summary.dueReviewCount }),
+                hint: summary.todayNewCardCount > 0
+                    ? `${t('dashboard.moduleReview', { count: summary.dueReviewCount })} · ${t('dashboard.moduleNewToday', { count: summary.todayNewCardCount })}`
+                    : t('dashboard.moduleReview', { count: summary.dueReviewCount }),
                 path: '/review',
                 icon: Repeat,
             },

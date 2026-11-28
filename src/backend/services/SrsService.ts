@@ -5,8 +5,11 @@ import type {
     SrsAddCardRequest,
     SrsAddCardResponse,
     SrsCard,
+    SrsIngestRequest,
+    SrsIngestResponse,
     SrsOverview,
     SrsReviewOutcome,
+    SrsSourceModule,
     SrsSubmitReviewRequest,
 } from '@/common/contracts/srs';
 import { SRS_INTERVAL_DAYS, SRS_PASS_SCORE } from '@/common/contracts/srs';
@@ -36,6 +39,17 @@ export default interface SrsService {
      * @throws 文本为空/过长或来源非法时抛出。
      */
     addCard(request: SrsAddCardRequest): Promise<SrsAddCardResponse>;
+
+    /**
+     * 统一入池：把学习模块刚学过的句子交给间隔复习。
+     *
+     * 新卡统一排到次日第一次复习；未达标直接进到期区并标记薄弱；
+     * 当日新卡超过上限时进入待办队列，按优先级顺延。
+     *
+     * @param request 句子、来源、学习模块与是否未达标。
+     * @returns 入池结果；排队中时 card 为 null。
+     */
+    ingest(request: SrsIngestRequest): Promise<SrsIngestResponse>;
 
     /**
      * 查询待复习与未来卡片。
@@ -79,6 +93,39 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 /** 复习文本的最大词数，与跟读评测保持一致。 */
 const MAX_REVIEW_WORDS = 200;
 
+/** 每日新卡上限；超出的进待办队列，按优先级顺延。 */
+const NEW_CARD_DAILY_LIMIT = 50;
+
+/** 入池优先级：数值越小越优先（薄弱 0、收藏 1、学习生词 2、对话 3）。 */
+const MODULE_PRIORITY: Record<SrsSourceModule, number> = {
+    player: 1,
+    original: 2,
+    practice: 2,
+    vocabulary: 2,
+    dialogue: 3,
+};
+
+/**
+ * 取本地当天零点。
+ * @param now 当前时间，epoch 毫秒。
+ */
+function startOfToday(now: number): number {
+    const date = new Date(now);
+    date.setHours(0, 0, 0, 0);
+    return date.getTime();
+}
+
+/**
+ * 取本地次日零点，作为新卡第一次复习时间。
+ * @param now 当前时间，epoch 毫秒。
+ */
+function startOfTomorrow(now: number): number {
+    const date = new Date(now);
+    date.setHours(0, 0, 0, 0);
+    date.setDate(date.getDate() + 1);
+    return date.getTime();
+}
+
 /**
  * 间隔复习服务。
  */
@@ -120,8 +167,100 @@ export class SrsServiceImpl implements SrsService {
         return { card, created };
     }
 
-    public overview(): Promise<SrsOverview> {
-        return this.srsCardRepository.overview(Date.now(), OVERVIEW_LIST_LIMIT, OVERVIEW_LIST_LIMIT);
+    public async ingest(request: SrsIngestRequest): Promise<SrsIngestResponse> {
+        const referenceText = request.referenceText.trim();
+        const wordCount = tokenizeForScoring(referenceText).length;
+        if (wordCount === 0) {
+            throw new Error('请先输入要复习的句子');
+        }
+        if (wordCount > MAX_REVIEW_WORDS) {
+            throw new Error(`复习句子过长，请控制在 ${MAX_REVIEW_WORDS} 词以内`);
+        }
+        const source = normalizeShadowingSource(request.source);
+        const cardKey = buildSrsCardKey(referenceText, source);
+        const word = request.word?.trim() ? request.word.trim() : null;
+        const now = Date.now();
+
+        const existing = await this.srsCardRepository.findByCardKey(cardKey);
+        if (existing) {
+            // 同一句从多个模块进来：只补来源与目标词，不改排期
+            await this.srsCardRepository.mergeCardMeta(cardKey, [request.module], word);
+            return { card: existing, created: false, queued: false };
+        }
+
+        const priority = request.failed ? 0 : (MODULE_PRIORITY[request.module] ?? 2);
+        const base = {
+            cardKey,
+            referenceText,
+            source,
+            word,
+            modules: [request.module],
+            priority,
+        };
+
+        // 未达标的直接进到期区，不受每日上限约束
+        if (request.failed) {
+            const { card, created } = await this.srsCardRepository.createIfAbsent({ ...base, dueAt: now });
+            await this.srsCardRepository.removeIntake(cardKey);
+            return { card, created, queued: false };
+        }
+
+        const todayStart = startOfToday(now);
+        const createdToday = await this.srsCardRepository.countCreatedBetween(todayStart, startOfTomorrow(now));
+        if (createdToday >= NEW_CARD_DAILY_LIMIT) {
+            await this.srsCardRepository.enqueueIntake({ ...base, createdAt: now });
+            this.logger.info('srs ingest queued', { module: request.module, cardKey });
+            return { card: null, created: false, queued: true };
+        }
+
+        const { card, created } = await this.srsCardRepository.createIfAbsent({
+            ...base,
+            dueAt: startOfTomorrow(now),
+        });
+        await this.srsCardRepository.removeIntake(cardKey);
+        this.logger.info('srs ingested', {
+            cardId: card.id,
+            created,
+            module: request.module,
+            failed: false,
+        });
+        return { card, created, queued: false };
+    }
+
+    /**
+     * 把待办队列按优先级转成正式卡片，直到用完当天的入池额度。
+     * @param now 当前时间，epoch 毫秒。
+     */
+    private async promoteIntake(now: number): Promise<void> {
+        const todayStart = startOfToday(now);
+        const tomorrowStart = startOfTomorrow(now);
+        let createdToday = await this.srsCardRepository.countCreatedBetween(todayStart, tomorrowStart);
+        if (createdToday >= NEW_CARD_DAILY_LIMIT) {
+            return;
+        }
+        const pending = await this.srsCardRepository.listIntake(NEW_CARD_DAILY_LIMIT - createdToday);
+        for (const item of pending) {
+            if (createdToday >= NEW_CARD_DAILY_LIMIT) {
+                break;
+            }
+            await this.srsCardRepository.createIfAbsent({
+                cardKey: item.cardKey,
+                referenceText: item.referenceText,
+                source: item.source,
+                dueAt: tomorrowStart,
+                word: item.word,
+                modules: item.modules,
+                priority: item.priority,
+            });
+            await this.srsCardRepository.removeIntake(item.cardKey);
+            createdToday += 1;
+        }
+    }
+
+    public async overview(): Promise<SrsOverview> {
+        const now = Date.now();
+        await this.promoteIntake(now);
+        return this.srsCardRepository.overview(now, OVERVIEW_LIST_LIMIT, OVERVIEW_LIST_LIMIT, startOfToday(now));
     }
 
     public async submitReview(request: SrsSubmitReviewRequest): Promise<SrsReviewOutcome> {

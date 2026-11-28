@@ -340,7 +340,15 @@
         "loadFailed": "加载复习计划失败",
         "retry": "重试",
         "sourceVideo": "视频句",
-        "sourceFree": "自由输入"
+        "sourceFree": "自由输入",
+        "newTitle": "今日新学",
+        "newHint": "今天入池，明天第一次复习；这里只看不考",
+        "targetWord": "目标词",
+        "modulePlayer": "沉浸播放",
+        "moduleOriginal": "原音跟读",
+        "modulePractice": "听写复述",
+        "moduleDialogue": "场景对话",
+        "moduleVocabulary": "词汇工坊"
     },
     "dashboard": {
         "title": "学习台",
@@ -392,6 +400,7 @@
         "moduleVocabulary": "{{count}} 个生词",
         "moduleVocabularyEmpty": "还没有生词",
         "moduleReview": "{{count}} 张待复习",
+        "moduleNewToday": "今日新学 {{count}} 条",
         "moduleFavorite": "{{count}} 条收藏",
         "moduleDubbing": "{{count}} 个配音",
         "moduleRepair": "{{count}} 组修复任务",

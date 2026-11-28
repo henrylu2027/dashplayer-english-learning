@@ -6,6 +6,7 @@ import type {
     ShadowingAttemptSummary,
     ShadowingScoreVO,
 } from '@/common/contracts/shadowing';
+import type { SrsSourceModule } from '@/common/contracts/srs';
 import { getRendererLogger } from '@/fronted/log/simple-logger';
 import { shadowingApi } from '@/fronted/features/shadowing/shadowingApi';
 import { useAudioRecorder } from '@/fronted/features/shadowing/useAudioRecorder';
@@ -39,9 +40,14 @@ export interface RecordedAttempt {
      * 提交本轮录音做评测。
      * @param referenceText 参考文本。
      * @param source 句子来源。
+     * @param ingestModule 学习来源模块；提供时自动送入间隔复习。
      * @returns 评测结果与记录；无录音或评测失败时为 null。
      */
-    submit: (referenceText: string, source: ShadowingAttemptSource) => Promise<{
+    submit: (
+        referenceText: string,
+        source: ShadowingAttemptSource,
+        ingestModule?: SrsSourceModule,
+    ) => Promise<{
         result: ShadowingScoreVO;
         attempt: ShadowingAttemptSummary;
     } | null>;
@@ -130,6 +136,7 @@ export function useRecordedAttempt(): RecordedAttempt {
     const submit = async (
         referenceText: string,
         source: ShadowingAttemptSource,
+        ingestModule?: SrsSourceModule,
     ): Promise<{ result: ShadowingScoreVO; attempt: ShadowingAttemptSummary } | null> => {
         if (!blob || scoring) {
             return null;
@@ -143,6 +150,7 @@ export function useRecordedAttempt(): RecordedAttempt {
                 audio: new Uint8Array(buffer),
                 mimeType: blob.type || 'audio/webm',
                 source,
+                ...(ingestModule ? { ingestModule } : {}),
             });
             setResult(response.result);
             setAttempt(response.attempt);

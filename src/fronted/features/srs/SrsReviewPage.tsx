@@ -3,10 +3,11 @@ import { useTranslation } from 'react-i18next';
 import type { TFunction } from 'i18next';
 import toast from 'react-hot-toast';
 import { useNavigate } from 'react-router-dom';
-import { BookmarkPlus, BookOpen, Loader2, Repeat, Trash2 } from 'lucide-react';
+import { BookmarkPlus, BookOpen, Loader2, Repeat, Trash2, Volume2 } from 'lucide-react';
 
-import type { SrsCard, SrsOverview, SrsReviewOutcome } from '@/common/contracts/srs';
+import type { SrsCard, SrsOverview, SrsReviewOutcome, SrsSourceModule } from '@/common/contracts/srs';
 import { SRS_PASS_SCORE } from '@/common/contracts/srs';
+import UrlUtil from '@/common/utils/UrlUtil';
 import PageHeader from '@/fronted/components/shared/common/PageHeader';
 import {
     AlertDialog,
@@ -31,6 +32,15 @@ const logger = getRendererLogger('SrsReviewPage');
 
 /** 一天对应的毫秒数，用于到期文案。 */
 const DAY_MS = 24 * 60 * 60 * 1000;
+
+/** 来源模块显示文案的翻译键。 */
+const MODULE_LABEL: Record<SrsSourceModule, string> = {
+    player: 'srs.modulePlayer',
+    original: 'srs.moduleOriginal',
+    practice: 'srs.modulePractice',
+    dialogue: 'srs.moduleDialogue',
+    vocabulary: 'srs.moduleVocabulary',
+};
 
 /**
  * 到期时间的展示文案。
@@ -136,6 +146,58 @@ function SrsCardRow({
 }
 
 /**
+ * 今日新学的一行：只做预览，不计分、不推进排期。
+ *
+ * @param card 今天刚入池的卡片。
+ * @param t 翻译函数。
+ * @param canPlay 是否有可播放的原声。
+ * @param onPlay 播放原声。
+ */
+function NewCardRow({
+    card,
+    t,
+    canPlay,
+    onPlay,
+}: {
+    card: SrsCard;
+    t: TFunction;
+    canPlay: boolean;
+    onPlay: (card: SrsCard) => void;
+}) {
+    return (
+        <div className="flex items-start gap-2 rounded-xl px-2 py-2">
+            {canPlay ? (
+                <button
+                    type="button"
+                    aria-label={t('srs.listen')}
+                    onClick={() => onPlay(card)}
+                    className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground transition-colors hover:text-foreground"
+                >
+                    <Volume2 className="h-3.5 w-3.5" />
+                </button>
+            ) : (
+                <span className="h-7 w-7 shrink-0" />
+            )}
+            <div className="min-w-0 flex-1">
+                <div className="text-sm leading-6 text-foreground">{card.referenceText}</div>
+                <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground">
+                    {card.word && (
+                        <span className="rounded-full bg-primary/10 px-1.5 py-0.5 text-primary">
+                            {t('srs.targetWord')} {card.word}
+                        </span>
+                    )}
+                    {card.sourceModules.map((module) => (
+                        <span key={module} className="rounded-full bg-muted px-1.5 py-0.5">
+                            {t(MODULE_LABEL[module])}
+                        </span>
+                    ))}
+                </div>
+            </div>
+        </div>
+    );
+}
+
+/**
  * 间隔复习页：以句子为单位，听原声 → 跟读 → 达标后自动延后。
  *
  * 卡片数据与判定全部在后端；本页只负责选卡、播放原声、录音和展示结果。
@@ -155,6 +217,8 @@ export default function SrsReviewPage() {
     const [adding, setAdding] = useState(false);
     /** 首次加载成功时自动选中第一张待复习卡，之后不再干预用户选择。 */
     const didAutoSelectRef = useRef(false);
+    /** 今日新学预览的播放器；离开页面时停掉。 */
+    const previewAudioRef = useRef<HTMLAudioElement | null>(null);
 
     const loadOverview = useCallback(async (): Promise<void> => {
         try {
@@ -233,6 +297,33 @@ export default function SrsReviewPage() {
             setPendingDelete(null);
         }
     };
+
+    // 离开页面时停掉预览音频，避免后台继续播放
+    useEffect(() => {
+        return () => {
+            previewAudioRef.current?.pause();
+            previewAudioRef.current = null;
+        };
+    }, []);
+
+    /** 预览今日新学的原声：只播放，不计分、不推进排期。 */
+    const playPreview = useCallback(async (card: SrsCard): Promise<void> => {
+        try {
+            previewAudioRef.current?.pause();
+            const filePath = await srsApi.sentenceAudio(card.id);
+            const audio = new Audio(UrlUtil.toUrl(filePath));
+            previewAudioRef.current = audio;
+            audio.onended = () => {
+                if (previewAudioRef.current === audio) {
+                    previewAudioRef.current = null;
+                }
+            };
+            await audio.play();
+        } catch (error) {
+            logger.error('预览原声失败', { error, cardId: card.id });
+            toast.error(error instanceof Error ? error.message : t('srs.listenFailed'));
+        }
+    }, [t]);
 
     if (loading) {
         return (
@@ -361,6 +452,29 @@ export default function SrsReviewPage() {
                                                     dueLabel={formatDue(card.dueAt, now, t)}
                                                     onSelect={() => setSelectedCard(card)}
                                                     onDelete={() => setPendingDelete(card)}
+                                                />
+                                            ))}
+                                        </div>
+                                    </section>
+                                )}
+
+                                {overview && overview.newCards.length > 0 && (
+                                    <section className="rounded-2xl border border-border/60 bg-card p-4 shadow-xs">
+                                        <div className="flex items-baseline justify-between">
+                                            <h2 className="text-sm font-medium text-foreground">{t('srs.newTitle')}</h2>
+                                            <span className="text-xs tabular-nums text-muted-foreground">
+                                                {overview.newCount}
+                                            </span>
+                                        </div>
+                                        <p className="mt-1 text-xs text-muted-foreground">{t('srs.newHint')}</p>
+                                        <div className="mt-2 flex flex-col gap-1">
+                                            {overview.newCards.map((card) => (
+                                                <NewCardRow
+                                                    key={card.id}
+                                                    card={card}
+                                                    t={t}
+                                                    canPlay={card.sourceKind === 'video' && Boolean(card.videoPath) && Boolean(card.subtitlePath)}
+                                                    onPlay={(item) => void playPreview(item)}
                                                 />
                                             ))}
                                         </div>

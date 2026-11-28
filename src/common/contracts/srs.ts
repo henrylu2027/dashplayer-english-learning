@@ -23,6 +23,13 @@ export const SRS_PASS_SCORE = 80;
 export const SRS_INTERVAL_DAYS: readonly number[] = [1, 3, 7, 14, 30];
 
 /**
+ * 学习来源模块。
+ *
+ * 五条学习路径 + 复习页自身；入池时记录来源，复习页据此显示标签。
+ */
+export type SrsSourceModule = 'player' | 'original' | 'practice' | 'dialogue' | 'vocabulary';
+
+/**
  * 一张间隔复习卡片。
  */
 export interface SrsCard {
@@ -30,6 +37,10 @@ export interface SrsCard {
     id: number;
     /** 要跟读的句子文本。 */
     referenceText: string;
+    /** 语境卡的目标词；普通句子卡为 null。 */
+    word: string | null;
+    /** 学习来源模块（去重后的有序列表）。 */
+    sourceModules: SrsSourceModule[];
     /** 来源类型。 */
     sourceKind: ShadowingSourceKind;
     /** 视频字幕内容哈希；自由输入时为 null。 */
@@ -70,6 +81,10 @@ export interface SrsOverview {
     dueCount: number;
     /** 卡片总数。 */
     totalCount: number;
+    /** 今日新学（今天入池、明天第一次到期）的卡片，只做预览。 */
+    newCards: SrsCard[];
+    /** 今日新学数量。 */
+    newCount: number;
     /** 生成这份概览的时间，epoch 毫秒；前端据此计算“还有几天”文案，避免渲染期取当前时间。 */
     generatedAt: number;
 }
@@ -92,6 +107,34 @@ export interface SrsAddCardResponse {
     card: SrsCard;
     /** 本次是否新建；false 表示这句话已经在复习队列里。 */
     created: boolean;
+}
+
+/**
+ * 统一入池请求：任一学习模块学完后把句子交给间隔复习。
+ */
+export interface SrsIngestRequest {
+    /** 要复习的句子文本。 */
+    referenceText: string;
+    /** 句子来源；视频句可回放原声。 */
+    source: ShadowingAttemptSource;
+    /** 学习来源模块。 */
+    module: SrsSourceModule;
+    /** 本次学习是否未达标；未达标直接进到期区并标记薄弱。 */
+    failed?: boolean;
+    /** 语境卡的目标词。 */
+    word?: string;
+}
+
+/**
+ * 入池结果。
+ */
+export interface SrsIngestResponse {
+    /** 入池后的卡片；排队中时为 null。 */
+    card: SrsCard | null;
+    /** 本次是否新建卡片。 */
+    created: boolean;
+    /** 是否因当日上限进入待办队列。 */
+    queued: boolean;
 }
 
 /**

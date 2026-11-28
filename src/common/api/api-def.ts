@@ -94,6 +94,8 @@ import type {
 import type {
     SrsAddCardRequest,
     SrsAddCardResponse,
+    SrsIngestRequest,
+    SrsIngestResponse,
     SrsOverview,
     SrsReviewOutcome,
     SrsSubmitReviewRequest,
@@ -567,6 +569,7 @@ interface DashboardDef {
 /** 间隔复习 IPC 定义。 */
 interface SrsDef {
     'srs/add-card': { params: SrsAddCardRequest, return: SrsAddCardResponse };
+    'srs/ingest': { params: SrsIngestRequest, return: SrsIngestResponse };
     'srs/overview': { params: void, return: SrsOverview };
     'srs/submit-review': { params: SrsSubmitReviewRequest, return: SrsReviewOutcome };
     'srs/remove-card': { params: { cardId: number }, return: void };

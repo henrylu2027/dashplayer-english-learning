@@ -14,6 +14,7 @@ export default class SrsController implements Controller {
 
     registerRoutes(): void {
         registerRoute('srs/add-card', (p) => this.srsService.addCard(p));
+        registerRoute('srs/ingest', (p) => this.srsService.ingest(p));
         registerRoute('srs/overview', () => this.srsService.overview());
         registerRoute('srs/submit-review', (p) => this.srsService.submitReview(p));
         registerRoute('srs/remove-card', (p) => this.srsService.removeCard(p.cardId));
