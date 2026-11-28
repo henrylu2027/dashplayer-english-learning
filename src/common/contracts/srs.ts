@@ -44,9 +44,15 @@ export type SrsSourceModule = 'player' | 'original' | 'practice' | 'dialogue' | 
  *
  * - `shadowing`：听原声后跟读，按跟读综合分判定；
  * - `dictation`：听原声后听写整句，按词准确率判定；
- * - `recall`：只看单词自评是否记得，用于没有语境的词卡。
+ * - `recall`：听原声后回忆整句，显示原文后自评；
+ * - `vocab`：看目标词回忆词义，展开释义与原句，固定形态。
  */
-export type SrsReviewForm = 'shadowing' | 'dictation' | 'recall';
+export type SrsReviewForm = 'shadowing' | 'dictation' | 'recall' | 'vocab';
+
+/**
+ * 掌握度判定。底部三按钮定方向，机器分只在跟读/听写形态下封顶。
+ */
+export type SrsVerdict = 'forgot' | 'fuzzy' | 'known';
 
 /**
  * 一张间隔复习卡片。
@@ -82,6 +88,8 @@ export interface SrsCard {
     reviewCount: number;
     /** 累计通过次数。 */
     passCount: number;
+    /** 掌握时间，epoch 毫秒；null 表示尚未掌握。 */
+    masteredAt: number | null;
     /** 创建时间，epoch 毫秒。 */
     createdAt: number;
     /** 最后更新时间，epoch 毫秒。 */
@@ -98,7 +106,13 @@ export interface SrsOverview {
     upcomingCards: SrsCard[];
     /** 待复习总数（不受列表条数限制）。 */
     dueCount: number;
-    /** 卡片总数。 */
+    /** 今日待复习：到期时间落在今天零点之后、当前时间之前的卡片数。 */
+    todayDueCount: number;
+    /** 逾期卡片数：到期时间早于今天零点。 */
+    overdueCount: number;
+    /** 已掌握卡片数。 */
+    masteredCount: number;
+    /** 卡片总数（含已掌握）。 */
     totalCount: number;
     /** 今日新学（今天入池、明天第一次到期）的卡片，只做预览。 */
     newCards: SrsCard[];
@@ -208,4 +222,104 @@ export interface SrsReviewOutcome {
     score: number;
     /** 通过后的间隔天数；未通过为 0，卡片立即回到待复习。 */
     intervalDays: number;
+}
+
+/**
+ * 复习前的打分请求：只读成绩，不改排期。
+ *
+ * 前端先看到机器分，再决定点哪个掌握度按钮；两步之间不需要临时状态表。
+ */
+export interface SrsCheckRequest {
+    /** 复习卡片 ID。 */
+    cardId: number;
+    /** 取证方式；认词与词汇形态不需要。 */
+    evidence?: SrsReviewEvidence;
+}
+
+/**
+ * 打分结果。
+ */
+export interface SrsCheckResult {
+    /** 复习卡片 ID。 */
+    cardId: number;
+    /** 本次使用的复习形态。 */
+    form: SrsReviewForm;
+    /** 机器分；认词与词汇形态没有机器分，为 null。 */
+    score: number | null;
+    /** 机器分是否达到通过线；没有机器分为 null。 */
+    passed: boolean | null;
+    /** 通过线。 */
+    passLine: number;
+}
+
+/**
+ * 掌握度判定请求：按钮定方向，后端重读机器分后再计算阶段。
+ */
+export interface SrsVerdictRequest {
+    /** 复习卡片 ID。 */
+    cardId: number;
+    /** 用户判定。 */
+    verdict: SrsVerdict;
+    /** 取证方式；认词与词汇形态不需要。 */
+    evidence?: SrsReviewEvidence;
+}
+
+/**
+ * 判定结果。
+ */
+export interface SrsVerdictResult {
+    /** 更新后的卡片。 */
+    card: SrsCard;
+    /** 本次使用的复习形态。 */
+    form: SrsReviewForm;
+    /** 用户判定。 */
+    verdict: SrsVerdict;
+    /** 机器分；没有机器分时为 null。 */
+    score: number | null;
+    /** 机器分是否通过；没有机器分为 null。 */
+    passed: boolean | null;
+    /** 本次判定后的间隔天数。 */
+    intervalDays: number;
+    /** 本次判定是否把卡片标记为已掌握。 */
+    mastered: boolean;
+}
+
+/**
+ * 左侧复习队列的查询范围。
+ *
+ * - `today`：今天到期但未逾期；
+ * - `overdue`：到期时间早于今天零点；
+ * - `new`：今天新入池，只做预览；
+ * - `all`：全部未掌握卡片；
+ * - `mastered`：已掌握卡片。
+ */
+export type SrsQueueScope = 'today' | 'overdue' | 'new' | 'all' | 'mastered';
+
+/**
+ * 队列筛选。依据卡片形态与来源，不新增存储字段。
+ */
+export type SrsQueueFilter = 'all' | 'shadowing' | 'dictation' | 'word' | 'dialogue';
+
+/**
+ * 队列分页请求。
+ */
+export interface SrsQueueRequest {
+    /** 查询范围。 */
+    scope: SrsQueueScope;
+    /** 筛选条件；默认全部。 */
+    filter?: SrsQueueFilter;
+    /** 偏移量，从 0 开始。 */
+    offset?: number;
+    /** 本次最多返回条数。 */
+    limit?: number;
+}
+
+/**
+ * 队列分页结果。
+ */
+export interface SrsQueueResponse {
+    /** 当前页卡片。 */
+    cards: SrsCard[];
+    /** 该范围与筛选下的总数。 */
+    total: number;
 }

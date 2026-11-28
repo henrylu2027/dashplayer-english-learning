@@ -95,11 +95,17 @@ import type {
 import type {
     SrsAddCardRequest,
     SrsAddCardResponse,
+    SrsCheckRequest,
+    SrsCheckResult,
     SrsIngestRequest,
     SrsIngestResponse,
     SrsOverview,
+    SrsQueueRequest,
+    SrsQueueResponse,
     SrsReviewOutcome,
     SrsSubmitReviewRequest,
+    SrsVerdictRequest,
+    SrsVerdictResult,
 } from '@/common/contracts/srs';
 import type { DashboardSummary } from '@/common/contracts/dashboard';
 import type {
@@ -576,6 +582,9 @@ interface SrsDef {
     'srs/add-card': { params: SrsAddCardRequest, return: SrsAddCardResponse };
     'srs/ingest': { params: SrsIngestRequest, return: SrsIngestResponse };
     'srs/overview': { params: void, return: SrsOverview };
+    'srs/queue': { params: SrsQueueRequest, return: SrsQueueResponse };
+    'srs/check': { params: SrsCheckRequest, return: SrsCheckResult };
+    'srs/verdict': { params: SrsVerdictRequest, return: SrsVerdictResult };
     'srs/submit-review': { params: SrsSubmitReviewRequest, return: SrsReviewOutcome };
     'srs/remove-card': { params: { cardId: number }, return: void };
     'srs/sentence-audio': { params: { cardId: number }, return: string };

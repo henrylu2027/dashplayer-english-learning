@@ -22,12 +22,23 @@ export function isWordOnlySrsCard(card: SrsReviewCardShape): boolean {
 }
 
 /**
+ * 卡片是否有可回放的原声。
+ *
+ * @param card 判定所需的卡片字段。
+ * @returns 视频句且保留视频/字幕路径时返回 true。
+ */
+export function hasSrsAudio(card: SrsReviewCardShape): boolean {
+    return card.sourceKind === 'video' && Boolean(card.videoPath) && Boolean(card.subtitlePath);
+}
+
+/**
  * 由卡片原料与阶段决定复习形态。
  *
  * 规则固定、可复现：
- * - 只有词的卡片只能认词自评；
- * - 有原声的句子卡在阶段 2~3 走听写，其余阶段跟读；
- * - 没有原声的句子卡一律跟读（听写无从播放）。
+ * - 只有词的卡片只能认词自评；这类卡没有原声原句，队列层已不再推送；
+ * - 带语境句的目标词卡固定走词汇形态，不随阶段变化；
+ * - 有原声的句子卡按阶段轮换：0~1 跟读、2~3 听写、4~5 听音回忆；
+ * - 没有原声的句子卡一律跟读（听写与回忆都无从播放）。
  *
  * @param card 判定所需的卡片字段。
  * @returns 复习形态。
@@ -36,11 +47,17 @@ export function resolveSrsReviewForm(card: SrsReviewCardShape): SrsReviewForm {
     if (isWordOnlySrsCard(card)) {
         return 'recall';
     }
-    const canDictate = card.sourceKind === 'video'
-        && Boolean(card.videoPath)
-        && Boolean(card.subtitlePath);
-    if (canDictate && (card.stage === 2 || card.stage === 3)) {
-        return 'dictation';
+    if (card.word?.trim()) {
+        return 'vocab';
+    }
+    if (hasSrsAudio(card)) {
+        if (card.stage <= 1) {
+            return 'shadowing';
+        }
+        if (card.stage <= 3) {
+            return 'dictation';
+        }
+        return 'recall';
     }
     return 'shadowing';
 }

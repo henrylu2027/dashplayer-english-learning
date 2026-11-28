@@ -5,12 +5,21 @@ import type {
     SrsAddCardRequest,
     SrsAddCardResponse,
     SrsCard,
+    SrsCheckRequest,
+    SrsCheckResult,
     SrsIngestRequest,
     SrsIngestResponse,
     SrsOverview,
+    SrsQueueRequest,
+    SrsQueueResponse,
+    SrsReviewEvidence,
+    SrsReviewForm,
     SrsReviewOutcome,
     SrsSourceModule,
     SrsSubmitReviewRequest,
+    SrsVerdict,
+    SrsVerdictRequest,
+    SrsVerdictResult,
 } from '@/common/contracts/srs';
 import {
     SRS_DEFAULT_DAILY_NEW_CARD_LIMIT,
@@ -68,14 +77,46 @@ export default interface SrsService {
     /**
      * 提交一次复习结果，并推进或回退复习阶段。
      *
-     * 取证方式必须与卡片当前的复习形态一致：句子卡提交跟读或听写记录，
-     * 词卡自评是否记得；分数一律由后端从记录里读取。
+     * 原音跟读页等「自动判定」场景使用：通过即判定为掌握，未通过即判定为忘记。
+     * 复习页使用 `check` + `verdict` 两步，让用户先看分、再点掌握度。
      *
      * @param request 卡片 ID 与取证方式。
      * @returns 是否通过、本次得分与更新后的卡片。
      * @throws 卡片/记录不存在、取证方式不匹配，或记录与卡片不是同一句时抛出。
      */
     submitReview(request: SrsSubmitReviewRequest): Promise<SrsReviewOutcome>;
+
+    /**
+     * 只打分，不改排期。
+     *
+     * 跟读/听写形态必须提交记录 ID；听音回忆与词汇形态没有机器分，返回 null。
+     *
+     * @param request 卡片 ID 与取证方式。
+     * @returns 形态、机器分与是否达到通过线。
+     * @throws 卡片/记录不存在、取证方式与形态不符，或记录与卡片不是同一句时抛出。
+     */
+    check(request: SrsCheckRequest): Promise<SrsCheckResult>;
+
+    /**
+     * 按用户判定推进排期，并写一条复习日志。
+     *
+     * 方向由按钮决定；跟读/听写形态机器分低于通过线时，无论点什么都不得升级。
+     *
+     * @param request 卡片 ID、判定与取证方式。
+     * @returns 更新后的卡片、得分、间隔与是否掌握。
+     * @throws 卡片/记录不存在、取证方式与形态不符，或记录与卡片不是同一句时抛出。
+     */
+    verdict(request: SrsVerdictRequest): Promise<SrsVerdictResult>;
+
+    /**
+     * 分页查询左侧复习队列。
+     *
+     * 查询层已排除没有原声原句的裸词，计数与列表口径一致。
+     *
+     * @param request 范围、筛选与分页参数。
+     * @returns 当前页卡片与总数。
+     */
+    queue(request: SrsQueueRequest): Promise<SrsQueueResponse>;
 
     /**
      * 修改每日新卡上限；0 表示暂停入池。
@@ -127,6 +168,80 @@ const MODULE_PRIORITY: Record<SrsSourceModule, number> = {
     vocabulary: 2,
     dialogue: 3,
 };
+
+/** 队列默认分页大小。 */
+const QUEUE_DEFAULT_LIMIT = 50;
+
+/** 队列单页上限。 */
+const QUEUE_MAX_LIMIT = 200;
+
+/**
+ * 某一阶段对应的间隔天数；stage 0 按第一档算，避免出现 0 天。
+ * @param stage 复习阶段。
+ */
+function intervalForStage(stage: number): number {
+    const index = Math.min(Math.max(stage, 1), SRS_INTERVAL_DAYS.length) - 1;
+    return SRS_INTERVAL_DAYS[index];
+}
+
+/**
+ * 一次判定后的排期结果。
+ */
+interface ScheduleDecision {
+    /** 新阶段。 */
+    stage: number;
+    /** 新到期时间，epoch 毫秒。 */
+    dueAt: number;
+    /** 间隔天数。 */
+    intervalDays: number;
+    /** 是否标记为已掌握。 */
+    mastered: boolean;
+}
+
+/**
+ * 按「按钮定方向 + 机器分封顶」计算新阶段。
+ *
+ * - 忘记：回到阶段 0，一天后重来；
+ * - 模糊：阶段不变，按当前阶段间隔顺延；
+ * - 掌握：阶段 +1；已在最高阶段时标记为已掌握；
+ * - 封顶：跟读/听写机器分低于通过线时，点掌握也不升级，按模糊处理。
+ *
+ * @param card 当前卡片。
+ * @param form 本次形态。
+ * @param verdict 用户判定。
+ * @param machinePassed 机器分是否通过；无机器分为 null。
+ * @param now 当前时间，epoch 毫秒。
+ */
+function decideSchedule(
+    card: SrsCard,
+    form: SrsReviewForm,
+    verdict: SrsVerdict,
+    machinePassed: boolean | null,
+    now: number,
+): ScheduleDecision {
+    const capped = (form === 'shadowing' || form === 'dictation') && machinePassed === false;
+
+    if (verdict === 'forgot') {
+        const days = intervalForStage(1);
+        return { stage: 0, dueAt: now + days * DAY_MS, intervalDays: days, mastered: false };
+    }
+    if (verdict === 'fuzzy' || capped) {
+        const days = intervalForStage(card.stage);
+        return { stage: card.stage, dueAt: now + days * DAY_MS, intervalDays: days, mastered: false };
+    }
+    if (card.stage >= SRS_INTERVAL_DAYS.length) {
+        const days = intervalForStage(SRS_INTERVAL_DAYS.length);
+        return {
+            stage: SRS_INTERVAL_DAYS.length,
+            dueAt: now + days * DAY_MS,
+            intervalDays: days,
+            mastered: true,
+        };
+    }
+    const stage = card.stage + 1;
+    const days = intervalForStage(stage);
+    return { stage, dueAt: now + days * DAY_MS, intervalDays: days, mastered: false };
+}
 
 /**
  * 取本地当天零点。
@@ -331,17 +446,9 @@ export class SrsServiceImpl implements SrsService {
     }
 
     public async submitReview(request: SrsSubmitReviewRequest): Promise<SrsReviewOutcome> {
-        this.assertPositiveInteger(request.cardId, '复习卡片 ID');
-        const card = await this.srsCardRepository.findById(request.cardId);
-        if (!card) {
-            throw new Error(`复习卡片不存在: ${request.cardId}`);
-        }
-
+        const card = await this.requireCard(request.cardId);
         const form = resolveSrsReviewForm(card);
-        if (request.evidence.type !== form) {
-            throw new Error('这张卡的复习形态已变化，请刷新后重试');
-        }
-        const evidence = await this.collectEvidence(card, request.evidence);
+        const evidence = await this.collectEvidence(card, form, request.evidence);
 
         const passed = evidence.passed;
         const now = Date.now();
@@ -350,7 +457,7 @@ export class SrsServiceImpl implements SrsService {
         let dueAt: number;
         if (passed) {
             stage = Math.min(card.stage + 1, SRS_INTERVAL_DAYS.length);
-            intervalDays = SRS_INTERVAL_DAYS[stage - 1];
+            intervalDays = intervalForStage(stage);
             dueAt = now + intervalDays * DAY_MS;
         } else {
             // 未达标：退一阶并立即回到待复习，让用户当场重读，而不是等明天
@@ -366,7 +473,16 @@ export class SrsServiceImpl implements SrsService {
             lastScore: evidence.score,
             lastAttemptId: evidence.attemptId,
             passed,
+            masteredAt: card.masteredAt,
         });
+        await this.writeReviewLog(
+            card.id,
+            form,
+            evidence.score,
+            passed,
+            passed ? 'known' : 'forgot',
+            now,
+        );
         this.logger.info('srs reviewed', {
             cardId: card.id,
             form,
@@ -380,26 +496,106 @@ export class SrsServiceImpl implements SrsService {
         return { card: updated, form, passed, score: evidence.score, intervalDays };
     }
 
+    public async check(request: SrsCheckRequest): Promise<SrsCheckResult> {
+        const card = await this.requireCard(request.cardId);
+        const form = resolveSrsReviewForm(card);
+        if (form !== 'shadowing' && form !== 'dictation') {
+            return { cardId: card.id, form, score: null, passed: null, passLine: SRS_PASS_SCORE };
+        }
+        const evidence = await this.collectEvidence(card, form, request.evidence);
+        return {
+            cardId: card.id,
+            form,
+            score: evidence.score,
+            passed: evidence.passed,
+            passLine: SRS_PASS_SCORE,
+        };
+    }
+
+    public async verdict(request: SrsVerdictRequest): Promise<SrsVerdictResult> {
+        const card = await this.requireCard(request.cardId);
+        const form = resolveSrsReviewForm(card);
+        this.assertVerdict(request.verdict);
+
+        const evidence = form === 'shadowing' || form === 'dictation'
+            ? await this.collectEvidence(card, form, request.evidence)
+            : { passed: null, score: null, attemptId: null };
+
+        const now = Date.now();
+        const decision = decideSchedule(card, form, request.verdict, evidence.passed, now);
+        const updated = await this.srsCardRepository.updateAfterReview({
+            id: card.id,
+            stage: decision.stage,
+            dueAt: decision.dueAt,
+            lastScore: evidence.score,
+            lastAttemptId: evidence.attemptId,
+            passed: evidence.passed ?? request.verdict === 'known',
+            masteredAt: decision.mastered ? now : null,
+        });
+        await this.writeReviewLog(
+            card.id,
+            form,
+            evidence.score,
+            evidence.passed,
+            request.verdict,
+            now,
+        );
+        this.logger.info('srs verdict', {
+            cardId: card.id,
+            form,
+            verdict: request.verdict,
+            score: evidence.score,
+            previousStage: card.stage,
+            stage: decision.stage,
+            intervalDays: decision.intervalDays,
+            mastered: decision.mastered,
+        });
+        return {
+            card: updated,
+            form,
+            verdict: request.verdict,
+            score: evidence.score,
+            passed: evidence.passed,
+            intervalDays: decision.intervalDays,
+            mastered: decision.mastered,
+        };
+    }
+
+    public async queue(request: SrsQueueRequest): Promise<SrsQueueResponse> {
+        const now = Date.now();
+        const limit = Math.min(
+            QUEUE_MAX_LIMIT,
+            Math.max(1, Math.floor(request.limit ?? QUEUE_DEFAULT_LIMIT)),
+        );
+        const offset = Math.max(0, Math.floor(request.offset ?? 0));
+        return this.srsCardRepository.listQueue({
+            now,
+            todayStart: startOfToday(now),
+            scope: request.scope ?? 'today',
+            filter: request.filter ?? 'all',
+            offset,
+            limit,
+        });
+    }
+
     /**
      * 按取证方式读取真实结果；前端提交的分数一概不采信。
      *
      * @param card 复习卡片。
+     * @param form 本次形态；只有跟读与听写需要记录。
      * @param evidence 取证方式。
-     * @returns 是否通过、得分与跟读记录 ID（非跟读形态为 null）。
-     * @throws 记录不存在、模式不符或与卡片不是同一句时抛出。
+     * @returns 是否通过、得分与跟读记录 ID。
+     * @throws 缺少记录、记录不存在、模式不符或与卡片不是同一句时抛出。
      */
     private async collectEvidence(
         card: SrsCard,
-        evidence: SrsSubmitReviewRequest['evidence'],
+        form: SrsReviewForm,
+        evidence?: SrsReviewEvidence,
     ): Promise<{ passed: boolean; score: number; attemptId: number | null }> {
-        if (evidence.type === 'recall') {
-            return {
-                passed: evidence.remembered,
-                score: evidence.remembered ? 100 : 0,
-                attemptId: null,
-            };
-        }
-        if (evidence.type === 'shadowing') {
+        if (form === 'shadowing') {
+            if (!evidence || evidence.type !== 'shadowing') {
+                throw new Error('这张卡需要提交跟读记录');
+            }
             this.assertPositiveInteger(evidence.attemptId, '跟读记录 ID');
             const attempt = await this.shadowingAttemptRepository.findById(evidence.attemptId);
             if (!attempt) {
@@ -412,22 +608,77 @@ export class SrsServiceImpl implements SrsService {
                 attemptId: attempt.id,
             };
         }
+        if (form === 'dictation') {
+            if (!evidence || evidence.type !== 'dictation') {
+                throw new Error('这张卡需要提交听写记录');
+            }
+            this.assertPositiveInteger(evidence.attemptId, '练习记录 ID');
+            const attempt = await this.practiceAttemptRepository.findById(evidence.attemptId);
+            if (!attempt) {
+                throw new Error(`练习记录不存在: ${evidence.attemptId}`);
+            }
+            if (attempt.mode !== 'dictation') {
+                throw new Error('听写复习必须提交听写记录');
+            }
+            this.assertSameTarget(card, attempt);
+            return {
+                passed: attempt.score >= SRS_PASS_SCORE,
+                score: attempt.score,
+                // 听写记录属于练习表，不写进 last_attempt_id，避免和跟读记录混用
+                attemptId: null,
+            };
+        }
+        throw new Error('当前复习形态不需要提交记录');
+    }
 
-        this.assertPositiveInteger(evidence.attemptId, '练习记录 ID');
-        const attempt = await this.practiceAttemptRepository.findById(evidence.attemptId);
-        if (!attempt) {
-            throw new Error(`练习记录不存在: ${evidence.attemptId}`);
+    /**
+     * 读取卡片，不存在时抛出。
+     * @param cardId 卡片 ID。
+     */
+    private async requireCard(cardId: number): Promise<SrsCard> {
+        this.assertPositiveInteger(cardId, '复习卡片 ID');
+        const card = await this.srsCardRepository.findById(cardId);
+        if (!card) {
+            throw new Error(`复习卡片不存在: ${cardId}`);
         }
-        if (attempt.mode !== 'dictation') {
-            throw new Error('听写复习必须提交听写记录');
+        return card;
+    }
+
+    /**
+     * 校验判定取值。
+     * @param verdict 用户判定。
+     * @throws 取值非法时抛出。
+     */
+    private assertVerdict(verdict: string): asserts verdict is SrsVerdict {
+        if (verdict !== 'forgot' && verdict !== 'fuzzy' && verdict !== 'known') {
+            throw new Error(`未知的掌握度判定: ${verdict}`);
         }
-        this.assertSameTarget(card, attempt);
-        return {
-            passed: attempt.score >= SRS_PASS_SCORE,
-            score: attempt.score,
-            // 听写记录属于练习表，不写进 last_attempt_id，避免和跟读记录混用
-            attemptId: null,
-        };
+    }
+
+    /**
+     * 写一条复习日志；失败只记警告，不回滚排期。
+     */
+    private async writeReviewLog(
+        cardId: number,
+        form: SrsReviewForm,
+        score: number | null,
+        passed: boolean | null,
+        verdict: SrsVerdict,
+        createdAt: number,
+    ): Promise<void> {
+        try {
+            await this.srsCardRepository.insertReviewLog({
+                cardId,
+                form,
+                score,
+                passed,
+                verdict,
+                errorTags: '',
+                createdAt,
+            });
+        } catch (error) {
+            this.logger.warn('srs review log failed', { cardId, error });
+        }
     }
 
     public async removeCard(cardId: number): Promise<void> {

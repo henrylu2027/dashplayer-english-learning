@@ -1,9 +1,15 @@
 import type {
     SrsAddCardRequest,
     SrsAddCardResponse,
+    SrsCheckRequest,
+    SrsCheckResult,
     SrsOverview,
+    SrsQueueRequest,
+    SrsQueueResponse,
     SrsReviewOutcome,
     SrsSubmitReviewRequest,
+    SrsVerdictRequest,
+    SrsVerdictResult,
 } from '@/common/contracts/srs';
 import { backendClient } from '@/fronted/infrastructure/electron/backendClient';
 
@@ -18,6 +24,18 @@ export const srsApi = {
     /** 查询待复习与未来卡片。 */
     overview: (): Promise<SrsOverview> =>
         backendClient.call('srs/overview'),
+
+    /** 分页查询复习队列。 */
+    queue: (params: SrsQueueRequest): Promise<SrsQueueResponse> =>
+        backendClient.call('srs/queue', params),
+
+    /** 只打分，不改排期。 */
+    check: (params: SrsCheckRequest): Promise<SrsCheckResult> =>
+        backendClient.call('srs/check', params),
+
+    /** 按掌握度判定推进排期。 */
+    verdict: (params: SrsVerdictRequest): Promise<SrsVerdictResult> =>
+        backendClient.call('srs/verdict', params),
 
     /** 用一条跟读记录提交复习结果。 */
     submitReview: (params: SrsSubmitReviewRequest): Promise<SrsReviewOutcome> =>

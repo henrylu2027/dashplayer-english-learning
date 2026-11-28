@@ -1,5 +1,14 @@
 import type { ShadowingAttemptSource } from '@/common/contracts/shadowing';
-import type { SrsCard, SrsOverview, SrsSourceModule } from '@/common/contracts/srs';
+import type {
+    SrsCard,
+    SrsOverview,
+    SrsQueueFilter,
+    SrsQueueResponse,
+    SrsQueueScope,
+    SrsReviewForm,
+    SrsSourceModule,
+    SrsVerdict,
+} from '@/common/contracts/srs';
 
 /**
  * 新建复习卡片的输入。
@@ -51,12 +60,52 @@ export interface UpdateSrsCardReviewParams {
     stage: number;
     /** 新到期时间，epoch 毫秒。 */
     dueAt: number;
-    /** 本次跟读得分。 */
-    lastScore: number;
+    /** 本次跟读得分；认词与词汇形态没有机器分时为 null。 */
+    lastScore: number | null;
     /** 本次跟读记录 ID；听写与认词没有跟读记录时为 null。 */
     lastAttemptId: number | null;
     /** 本次是否通过，用于累计通过次数。 */
     passed: boolean;
+    /** 掌握时间；本次判定后仍未掌握时为 null。 */
+    masteredAt: number | null;
+}
+
+/**
+ * 复习队列分页查询。
+ */
+export interface SrsQueueQuery {
+    /** 当前时间，epoch 毫秒。 */
+    now: number;
+    /** 今日零点，epoch 毫秒。 */
+    todayStart: number;
+    /** 查询范围。 */
+    scope: SrsQueueScope;
+    /** 筛选条件。 */
+    filter: SrsQueueFilter;
+    /** 偏移量。 */
+    offset: number;
+    /** 最多返回条数。 */
+    limit: number;
+}
+
+/**
+ * 一条复习日志。
+ */
+export interface SrsReviewLogEntry {
+    /** 卡片 ID。 */
+    cardId: number;
+    /** 本次形态。 */
+    form: SrsReviewForm;
+    /** 机器分；无机器分时为 null。 */
+    score: number | null;
+    /** 机器分是否通过；无机器分时为 null。 */
+    passed: boolean | null;
+    /** 用户判定。 */
+    verdict: SrsVerdict;
+    /** 错误标签，逗号分隔。 */
+    errorTags: string;
+    /** 判定时间，epoch 毫秒。 */
+    createdAt: number;
 }
 
 /**
@@ -155,4 +204,27 @@ export default interface SrsCardRepository {
      * @param cardKey 卡片键。
      */
     removeIntake(cardKey: string): Promise<void>;
+
+    /**
+     * 分页查询复习队列。
+     *
+     * 只返回「有原声原句」的卡片：没有出处的裸词不进入复习池。
+     *
+     * @param query 范围、筛选与分页参数。
+     * @returns 当前页卡片与总数。
+     */
+    listQueue(query: SrsQueueQuery): Promise<SrsQueueResponse>;
+
+    /**
+     * 写一条复习日志。
+     * @param entry 日志内容。
+     */
+    insertReviewLog(entry: SrsReviewLogEntry): Promise<void>;
+
+    /**
+     * 查询某个时间点之后的复习日志，按时间倒序。
+     * @param from 起始时间（含），epoch 毫秒。
+     * @param limit 最多返回条数。
+     */
+    listReviewLog(from: number, limit: number): Promise<SrsReviewLogEntry[]>;
 }

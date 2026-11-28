@@ -1,15 +1,26 @@
-import { and, asc, eq, gt, gte, lt, lte, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, gt, gte, isNotNull, isNull, lt, lte, sql, type SQL } from 'drizzle-orm';
 import { injectable } from 'inversify';
 
 import db from '@/backend/infrastructure/db';
 import { srsCard, type SrsCardRow } from '@/backend/infrastructure/db/tables/srsCard';
 import { reviewInbox } from '@/backend/infrastructure/db/tables/reviewInbox';
+import { srsReviewLog } from '@/backend/infrastructure/db/tables/srsReviewLog';
 import type { ShadowingSourceKind } from '@/common/contracts/shadowing';
-import type { SrsCard, SrsOverview, SrsSourceModule } from '@/common/contracts/srs';
+import type {
+    SrsCard,
+    SrsOverview,
+    SrsQueueFilter,
+    SrsQueueResponse,
+    SrsReviewForm,
+    SrsSourceModule,
+    SrsVerdict,
+} from '@/common/contracts/srs';
 import type SrsCardRepository from '@/backend/services/repositories/SrsCardRepository';
 import type {
     CreateSrsCardParams,
     IntakeItem,
+    SrsQueueQuery,
+    SrsReviewLogEntry,
     UpdateSrsCardReviewParams,
 } from '@/backend/services/repositories/SrsCardRepository';
 
@@ -49,6 +60,53 @@ function mergeModules(base: SrsSourceModule[], extra: SrsSourceModule[]): SrsSou
 }
 
 /**
+ * 可复习条件：排除「无原声原句」的裸词。
+ *
+ * 早期把默认词表批量推进复习池产生的裸词（单个词、没有视频绑定）
+ * 复习时无从播放也无从跟读，统一在查询层过滤掉。
+ */
+const REVIEWABLE: SQL = sql`NOT (
+    (
+        ${srsCard.source_kind} <> 'video'
+        OR ${srsCard.video_path} IS NULL
+        OR ${srsCard.subtitle_path} IS NULL
+    )
+    AND instr(trim(${srsCard.reference_text}), ' ') = 0
+)`;
+
+/** 卡片是否有可回放的原声。 */
+const HAS_AUDIO: SQL = sql`(
+    ${srsCard.source_kind} = 'video'
+    AND ${srsCard.video_path} IS NOT NULL
+    AND ${srsCard.subtitle_path} IS NOT NULL
+)`;
+
+/** 卡片是否带目标词（语境卡）。 */
+const HAS_WORD: SQL = sql`(${srsCard.word} IS NOT NULL AND trim(${srsCard.word}) <> '')`;
+
+/**
+ * 按复习形态生成筛选条件，与 `resolveSrsReviewForm` 保持一致。
+ * @param filter 形态筛选。
+ * @returns SQL 条件；`all` 返回 undefined。
+ */
+function formFilter(filter: SrsQueueFilter): SQL | undefined {
+    if (filter === 'word') {
+        return HAS_WORD;
+    }
+    if (filter === 'dialogue') {
+        return sql`${srsCard.source_modules} LIKE '%dialogue%'`;
+    }
+    const noWord = sql`(${srsCard.word} IS NULL OR trim(${srsCard.word}) = '')`;
+    if (filter === 'dictation') {
+        return sql`${noWord} AND ${HAS_AUDIO} AND ${srsCard.stage} BETWEEN 2 AND 3`;
+    }
+    if (filter === 'shadowing') {
+        return sql`${noWord} AND NOT (${HAS_AUDIO} AND ${srsCard.stage} >= 2)`;
+    }
+    return undefined;
+}
+
+/**
  * 把数据库行映射为跨层卡片。
  */
 function mapRow(row: SrsCardRow): SrsCard {
@@ -71,6 +129,7 @@ function mapRow(row: SrsCardRow): SrsCard {
         lastAttemptId: row.last_attempt_id,
         reviewCount: row.review_count,
         passCount: row.pass_count,
+        masteredAt: row.mastered_at,
         createdAt: row.created_at,
         updatedAt: row.updated_at,
     };
@@ -144,7 +203,7 @@ export default class SrsCardRepositoryImpl implements SrsCardRepository {
         upcomingLimit: number,
         newFrom: number,
     ): Promise<Omit<SrsOverview, 'dailyNewCardLimit'>> {
-        const dueCondition = lte(srsCard.due_at, now);
+        const dueCondition = and(lte(srsCard.due_at, now), isNull(srsCard.mastered_at), REVIEWABLE);
         const dueRows = db
             .select()
             .from(srsCard)
@@ -155,41 +214,42 @@ export default class SrsCardRepositoryImpl implements SrsCardRepository {
         const upcomingRows = db
             .select()
             .from(srsCard)
-            .where(gt(srsCard.due_at, now))
+            .where(and(gt(srsCard.due_at, now), isNull(srsCard.mastered_at), REVIEWABLE))
             .orderBy(asc(srsCard.due_at), asc(srsCard.id))
             .limit(upcomingLimit)
             .all();
 
-        const dueCountRow = db
-            .select({ count: sql<number>`count(*)` })
-            .from(srsCard)
-            .where(dueCondition)
-            .get();
-        const totalCountRow = db
-            .select({ count: sql<number>`count(*)` })
-            .from(srsCard)
-            .get();
+        const countWhere = (condition: SQL | undefined): number => Number(
+            db
+                .select({ count: sql<number>`count(*)` })
+                .from(srsCard)
+                .where(condition)
+                .get()?.count ?? 0,
+        );
+        const newCondition = and(
+            gte(srsCard.created_at, newFrom),
+            lte(srsCard.created_at, now),
+            isNull(srsCard.mastered_at),
+            REVIEWABLE,
+        );
         const newRows = db
             .select()
             .from(srsCard)
-            .where(and(gte(srsCard.created_at, newFrom), lte(srsCard.created_at, now)))
+            .where(newCondition)
             .orderBy(asc(srsCard.priority), asc(srsCard.id))
             .limit(50)
             .all();
-        // 预览列表最多 50 条，但计数必须是全量，否则把上限调到 50 以上就失去意义
-        const newCountRow = db
-            .select({ count: sql<number>`count(*)` })
-            .from(srsCard)
-            .where(and(gte(srsCard.created_at, newFrom), lte(srsCard.created_at, now)))
-            .get();
 
         return {
             dueCards: dueRows.map(mapRow),
             upcomingCards: upcomingRows.map(mapRow),
-            dueCount: Number(dueCountRow?.count ?? 0),
-            totalCount: Number(totalCountRow?.count ?? 0),
+            dueCount: countWhere(dueCondition),
+            todayDueCount: countWhere(and(gte(srsCard.due_at, newFrom), dueCondition)),
+            overdueCount: countWhere(and(lt(srsCard.due_at, newFrom), isNull(srsCard.mastered_at), REVIEWABLE)),
+            masteredCount: countWhere(and(isNotNull(srsCard.mastered_at), REVIEWABLE)),
+            totalCount: countWhere(REVIEWABLE),
             newCards: newRows.map(mapRow),
-            newCount: Number(newCountRow?.count ?? 0),
+            newCount: countWhere(newCondition),
             generatedAt: now,
         };
     }
@@ -204,6 +264,7 @@ export default class SrsCardRepositoryImpl implements SrsCardRepository {
                 last_attempt_id: params.lastAttemptId,
                 review_count: sql`${srsCard.review_count} + 1`,
                 pass_count: sql`${srsCard.pass_count} + ${params.passed ? 1 : 0}`,
+                mastered_at: params.masteredAt,
                 updated_at: Date.now(),
             })
             .where(eq(srsCard.id, params.id))
@@ -345,5 +406,96 @@ export default class SrsCardRepositoryImpl implements SrsCardRepository {
         db.delete(reviewInbox)
             .where(eq(reviewInbox.card_key, cardKey))
             .run();
+    }
+
+    /**
+     * 组装队列范围条件。
+     * @param query 队列查询。
+     * @returns SQL 条件。
+     */
+    private scopeCondition(query: SrsQueueQuery): SQL | undefined {
+        const { scope, now, todayStart } = query;
+        switch (scope) {
+            case 'overdue':
+                return and(lt(srsCard.due_at, todayStart), isNull(srsCard.mastered_at), REVIEWABLE);
+            case 'new':
+                return and(
+                    gte(srsCard.created_at, todayStart),
+                    lte(srsCard.created_at, now),
+                    isNull(srsCard.mastered_at),
+                    REVIEWABLE,
+                );
+            case 'mastered':
+                return and(isNotNull(srsCard.mastered_at), REVIEWABLE);
+            case 'today':
+                return and(
+                    gte(srsCard.due_at, todayStart),
+                    lte(srsCard.due_at, now),
+                    isNull(srsCard.mastered_at),
+                    REVIEWABLE,
+                );
+            case 'all':
+            default:
+                return and(isNull(srsCard.mastered_at), REVIEWABLE);
+        }
+    }
+
+    public async listQueue(query: SrsQueueQuery): Promise<SrsQueueResponse> {
+        const condition = and(this.scopeCondition(query), formFilter(query.filter));
+        const order = query.scope === 'mastered'
+            ? [desc(srsCard.mastered_at), asc(srsCard.id)]
+            : query.scope === 'new'
+                ? [asc(srsCard.priority), asc(srsCard.id)]
+                : [asc(srsCard.due_at), asc(srsCard.id)];
+        const cards = db
+            .select()
+            .from(srsCard)
+            .where(condition)
+            .orderBy(...order)
+            .limit(query.limit)
+            .offset(query.offset)
+            .all()
+            .map(mapRow);
+        const total = Number(
+            db
+                .select({ count: sql<number>`count(*)` })
+                .from(srsCard)
+                .where(condition)
+                .get()?.count ?? 0,
+        );
+        return { cards, total };
+    }
+
+    public async insertReviewLog(entry: SrsReviewLogEntry): Promise<void> {
+        db.insert(srsReviewLog)
+            .values({
+                card_id: entry.cardId,
+                form: entry.form,
+                score: entry.score,
+                passed: entry.passed === null ? null : (entry.passed ? 1 : 0),
+                verdict: entry.verdict,
+                error_tags: entry.errorTags,
+                created_at: entry.createdAt,
+            })
+            .run();
+    }
+
+    public async listReviewLog(from: number, limit: number): Promise<SrsReviewLogEntry[]> {
+        return db
+            .select()
+            .from(srsReviewLog)
+            .where(gte(srsReviewLog.created_at, from))
+            .orderBy(desc(srsReviewLog.created_at), desc(srsReviewLog.id))
+            .limit(limit)
+            .all()
+            .map((row) => ({
+                cardId: row.card_id,
+                form: row.form as SrsReviewForm,
+                score: row.score,
+                passed: row.passed === null ? null : row.passed === 1,
+                verdict: row.verdict as SrsVerdict,
+                errorTags: row.error_tags,
+                createdAt: row.created_at,
+            }));
     }
 }
