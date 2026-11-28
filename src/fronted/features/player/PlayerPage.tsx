@@ -1,5 +1,6 @@
 import React, {useCallback, useEffect, useLayoutEffect, useRef, useState} from 'react';
 import {useLocation, useParams, useSearchParams} from 'react-router-dom';
+import {useLocalStorage} from '@uidotdev/usehooks';
 import useLayout, {cpW} from '@/fronted/hooks/useLayout';
 import {cn} from '@/fronted/lib/utils';
 import FileBrowser from '@/fronted/features/file-browser/components/FileBrowser';
@@ -37,6 +38,9 @@ const logger = getRendererLogger('PlayerWithControlsPage');
 const MODE_SWITCH_TOAST_ID = 'mode-switch-toast';
 const PLAYBACK_ISSUE_TOAST_ID = 'playback-issue-toast';
 const SUBTITLE_SUSPICION_TOAST_ID = 'subtitle-suspicion-toast';
+/** 播放区中间栏宽度百分比：默认 60%，只能往右加宽到 75%。 */
+const SPLIT_MID_MIN = 60;
+const SPLIT_MID_MAX = 75;
 
 /**
  * 生成播放修复提示的 toast ID：同一条提示只允许存在一个，不同场景互不覆盖。
@@ -463,6 +467,13 @@ const PlayerWithControlsPage = () => {
      * 界面元素恢复设计字号。
      */
     const [pos, setPos] = useState({x: 0, y: 0, width: 0, height: 0});
+    /** 播放区所在中间栏的宽度百分比：分隔条只能往右拖，从 60% 最多加到 75%。 */
+    const [midPct, setMidPct] = useLocalStorage<number>('player-mid-width', SPLIT_MID_MIN);
+    const clampedMid = Math.min(
+        SPLIT_MID_MAX,
+        Math.max(SPLIT_MID_MIN, Number.isFinite(midPct) ? midPct : SPLIT_MID_MIN)
+    );
+    const midDragRef = useRef<{ startX: number; startPct: number } | null>(null);
     useLayoutEffect(() => {
         const updatePos = () => {
             if (posRef.current === null) {
@@ -484,12 +495,41 @@ const PlayerWithControlsPage = () => {
         return () => {
             window.removeEventListener('resize', updatePos);
         };
-    }, [titleBarHeight]);
+    }, [titleBarHeight, clampedMid]);
+
+    /** 分隔条按下：记录起点，拖动时把位移换算成中间栏的百分比。 */
+    const handleSplitterDown = (event: React.PointerEvent<HTMLButtonElement>) => {
+        event.preventDefault();
+        event.currentTarget.setPointerCapture(event.pointerId);
+        midDragRef.current = { startX: event.clientX, startPct: clampedMid };
+    };
+
+    /** 分隔条拖动：只允许加宽中间栏，回到 60% 就停住。 */
+    const handleSplitterMove = (event: React.PointerEvent<HTMLButtonElement>) => {
+        const drag = midDragRef.current;
+        if (!drag) {
+            return;
+        }
+        const width = event.currentTarget.parentElement?.getBoundingClientRect().width ?? window.innerWidth;
+        if (width <= 0) {
+            return;
+        }
+        const next = drag.startPct + ((event.clientX - drag.startX) / width) * 100;
+        setMidPct(Math.min(SPLIT_MID_MAX, Math.max(SPLIT_MID_MIN, next)));
+    };
+
+    /** 分隔条松开：结束拖动并释放指针捕获。 */
+    const handleSplitterUp = (event: React.PointerEvent<HTMLButtonElement>) => {
+        midDragRef.current = null;
+        if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+            event.currentTarget.releasePointerCapture(event.pointerId);
+        }
+    };
 
     const showPlayer = w('md') && h('md');
     const gridTemplate = () => {
         if (showPlayer && w('xl')) {
-            return '15% 60% 25%';
+            return `15% ${clampedMid}% ${85 - clampedMid}%`;
         }
         if (showPlayer) {
             return '65px calc((100% - 65px) * 12 / 17) calc((100% - 65px) * 5 / 17)';
@@ -574,6 +614,22 @@ const PlayerWithControlsPage = () => {
                 {/* 播放类快捷键在学习页打开期间停用（见 PlayerShortcut）；控制面板与字幕列表保持可用 */}
                 <ControlButton/>
                 <PlayerShortcut/>
+
+                {/* 播放区与右侧「视频浏览」的分隔条：只能往右拖，把播放画面拉宽 */}
+                {showSideBar && showPlayer && w('xl') && (
+                    <button
+                        type="button"
+                        aria-label="拖动调整视频区宽度"
+                        onPointerDown={handleSplitterDown}
+                        onPointerMove={handleSplitterMove}
+                        onPointerUp={handleSplitterUp}
+                        onPointerCancel={handleSplitterUp}
+                        className="group absolute inset-y-1 z-30 flex w-2 -translate-x-1/2 cursor-col-resize touch-none select-none items-center justify-center"
+                        style={{ left: `calc(15% + ${clampedMid}%)` }}
+                    >
+                        <span className="h-12 w-1 rounded-full bg-stone-500/0 transition-colors duration-150 group-hover:bg-rose-600/80" />
+                    </button>
+                )}
 
             </div>
         </div>

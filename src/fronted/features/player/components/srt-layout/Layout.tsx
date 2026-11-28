@@ -183,9 +183,7 @@ const PlaybackLayout = () => {
                 )}
                 direction={'horizontal'}>
                 <ResizablePanel
-                    // 分隔条只允许往右拖：视频区最小 70%，不能把播放画面拖窄
-                    defaultSize={Math.max(sizeOa, 70)}
-                    minSize={70}
+                    defaultSize={sizeOa}
                     onResize={(e) => {
                         if (fullScreen) {
                             return;
