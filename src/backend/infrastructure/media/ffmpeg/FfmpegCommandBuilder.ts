@@ -30,6 +30,14 @@ const AUDIO_TRANSCODE_ARGS = ['-ac', '2', '-c:a', 'aac', '-b:a', '128k'];
 const MAX_TRANSCODE_WIDTH = 1920;
 
 /**
+ * 句原声裁剪时前置的静音长度（毫秒）。
+ *
+ * 蓝牙耳机从待机切回 A2DP、或音频输出流刚建立时，会吞掉开头约 0.5~1 秒；
+ * 先垫 0.8 秒空白，用户第一次点「听原声」也不会丢掉句首。
+ */
+const TRIM_AUDIO_LEAD_SILENCE_MS = 800;
+
+/**
  * 滤镜图中的时间字面量格式：毫秒级精度，避免科学计数法污染滤镜表达式。
  */
 const formatSeconds = (value: number): string => value.toFixed(3);
@@ -332,7 +340,11 @@ export class DefaultFfmpegCommandBuilder implements FfmpegCommandBuilder {
             '-y',
             '-ss', TimeUtil.secondToTimeStrWithMs(args.startSecond),
             '-i', args.inputFile,
-            '-t', `${duration}`,
+            // 前置一小段静音：音频输出设备（尤其蓝牙耳机）刚唤醒时会吞掉开头约半秒，
+            // 空白先行可以让第一次点「听原声」也听全首词，代价只是句前多一拍停顿。
+            // aresample 把延迟后的时间戳压回 0，否则 mp3 封装会报 DTS 非单调。
+            '-af', `adelay=${TRIM_AUDIO_LEAD_SILENCE_MS}:all=1,aresample=async=1:first_pts=0`,
+            '-t', `${duration + TRIM_AUDIO_LEAD_SILENCE_MS / 1000}`,
             '-c:a', audioCodec,
             '-b:a', audioBitrate,
             args.outputFile,

@@ -77,7 +77,8 @@ export class SentenceAudioServiceImpl implements SentenceAudioService {
             throw new Error('句子时间区间无效，无法播放原声');
         }
 
-        const cacheKey = createHash('sha1').update(`${videoPath}|${start}|${end}`).digest('hex');
+        // v2：裁剪会前置 0.8 秒静音（防止输出设备唤醒吞掉句首），旧缓存不再复用
+        const cacheKey = createHash('sha1').update(`v2|${videoPath}|${start}|${end}`).digest('hex');
         const tempRoot = await this.storageDirectoryProvider.provideDirectory(StorageDirectoryTarget.TEMP);
         const folder = path.join(tempRoot, 'sentence-audio');
         const audioFile = path.join(folder, `${cacheKey}.mp3`);
