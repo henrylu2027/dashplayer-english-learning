@@ -43,7 +43,7 @@ What changes per page is the **task** and therefore the **scoring rule**:
 | Page | Task | How it is judged |
 |---|---|---|
 | Shadowing | say the line after hearing it | word-by-word against the line |
-| Spaced review | say it again when due | same word-by-word score; pass moves the card forward |
+| Spaced review | review a saved sentence in the form its stage calls for | machine score first; the mastery button then decides direction |
 | Dictation | type what you hear | word-by-word against the line |
 | Retell | say it in your own words | keyword coverage, not exact wording |
 | Scene dialogue | say your part in a scripted conversation | per-line correction (wording / grammar / pronunciation), script followed line by line |
@@ -55,7 +55,9 @@ If two of these feel identical to you, that is useful feedback: it means the tas
 | Area | What it does |
 |---|---|
 | **Shadowing** | Record a line; local ASR + word alignment mark correct / wrong / missing / extra words. Honest word-level scoring — no fake pronunciation score. |
-| **Spaced Review** | Review means listening and shadowing again. The backend reads the real attempt score; a pass postpones the card (1/3/7/14/30 days), a fail returns it immediately. |
+| **Spaced Review** | A queue grouped into overdue / due today / new, with source, form, stage and last score. The right pane picks one of five review forms by card type and stage (shadowing, dictation, listening recall, vocabulary, scenario retell). A bottom bar with Forgot / Fuzzy / Known sets the direction; a machine score under 80 can never promote a card. Stage 5 plus Known marks it mastered. Every verdict is logged with error tags (pronunciation, spelling, missing, extra, fluency, structure). |
+| **Review archive** | Session view, history grouped by date, a 60-day calendar heatmap, and CSV export. Cards can be filtered by the last error tag for targeted practice. |
+| **Context kept** | Each card ships a video thumbnail, a “back to the source” jump that seeks to the sentence, and word-level feedback. Cards without an original sentence and audio are rejected at intake — no orphan word cards. |
 | **Dashboard** | Today’s practice (shadowing + dictation/retell + dialogue turns), streak, 7-day activity. |
 | **Dictation & Retell** | Word-by-word dictation check; retelling scored by keyword coverage, not exact wording. |
 | **Scene Dialogue** | Rehearses the clip's own dialogue. The whole subtitle track becomes a script rail; the AI speaks the next original line (it does not invent lines), the learner says their part, each line is spoken before the next appears, and every learner line gets a per-line correction card. Review at the end; good lines go into the same queue. |
@@ -95,7 +97,7 @@ Renderer (React features)
 - Front end: `src/fronted/features/<domain>/`
 - Back end: `controllers / services / infrastructure / ioc`
 - Contracts: `src/common/contracts/**`, `src/common/api/api-def.ts`
-- SQLite + Drizzle; migrations `0007`–`0012` add the learning tables.
+- SQLite + Drizzle; migrations `0007`–`0018` add the learning tables (SRS cards, review log, error tags).
 - Shared engines: tokenization, word alignment, sentence audio, recorded speech, recorder hook, local-model adapter.
 
 ## Quick start
@@ -133,7 +135,7 @@ corepack yarn package
 
 ## Project status
 
-- Baseline tag: `portfolio-p6`.
+- Baseline tag: `portfolio-p9n`.
 - All five learning stages are implemented and tested end-to-end on Windows.
 - The local 2B model can run offline but gives weaker scene relevance and feedback than cloud models; the UI labels the reviewing model.
 - Not tested on macOS/Linux in this fork; the upstream project supports them.
@@ -153,6 +155,9 @@ corepack yarn package
 这是 [DashPlayer](https://github.com/solidSpoon/DashPlayer) 的英语学习修改版，以“视频句”为唯一学习单元，串起跟读打分、间隔复习、听写复述、场景对话与学习台。
 
 - 五个页面共用一套引擎（取句 → 播/录 → 本地识别 → 逐词对齐 → 打分 → 进复习队列），区别在任务与判定规则；任务形态不够区分的地方，会合并而不是再开一个页面。
+- 间隔复习按来源归集：逾期 / 今日 / 新入池三分组，右侧按卡片类型切五类复习台（跟读、听写、听音回忆、词汇、情景复述），底部「忘记 / 模糊 / 掌握」定方向，机器分低于 80 不升级。
+- 每张卡带原片截图与「回到原片」定位；复习记录支持按日期回溯、日历视图与 CSV 导出，可按最近错误标签做专项复习。
+- 没有原句与原声的裸词在入池时直接拒绝，不占用每日新卡额度。
 - 场景对话照原片台词逐句演：AI 念剧本原句而不是自由发挥，一句读完才出下一句，每句下方给纠错卡。
 - 评分只做词级，不做假音素级；对话点评标注模型来源，不冒充考试分数。
 - 对话模型可切换内置本地模型（离线）或 OpenAI 兼容接口。
