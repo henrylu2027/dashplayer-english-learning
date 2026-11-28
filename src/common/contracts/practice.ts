@@ -51,6 +51,11 @@ export interface DictationRequest {
     typedText: string;
     /** 句子来源。 */
     source: ShadowingAttemptSource;
+    /**
+     * 是否为复习场景：true 时不把本次结果再次入池，也不调用模型点评。
+     * 复习页只关心逐词准确率，用它来判定是否通过。
+     */
+    forReview?: boolean;
 }
 
 /**

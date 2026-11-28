@@ -16,6 +16,7 @@ import {
 import type { ShadowingAttemptSource, ShadowingScoreVO } from '@/common/contracts/shadowing';
 import type { SrsOverview } from '@/common/contracts/srs';
 import type { WordOriginInput } from '@/common/contracts/vocabulary';
+import { resolveSrsReviewForm } from '@/common/utils/srsReviewForm';
 import { SRS_PASS_SCORE } from '@/common/contracts/srs';
 import UrlUtil from '@/common/utils/UrlUtil';
 import PageHeader from '@/fronted/components/shared/common/PageHeader';
@@ -321,7 +322,11 @@ export default function OriginalShadowingPage() {
         setLoadingQueue(true);
         try {
             const overview: SrsOverview = await srsApi.overview();
-            const next: QueueEntry[] = overview.dueCards.map((card) => ({
+            // 这个页面只会跟读，听写与认词形态的卡片留给复习页
+            const shadowingCards = overview.dueCards.filter(
+                (card) => resolveSrsReviewForm(card) === 'shadowing',
+            );
+            const next: QueueEntry[] = shadowingCards.map((card) => ({
                 id: `card-${card.id}`,
                 text: card.referenceText,
                 source: card.sourceKind === 'video'
@@ -406,7 +411,7 @@ export default function OriginalShadowingPage() {
                 try {
                     const reviewed = await srsApi.submitReview({
                         cardId: selected.cardId,
-                        attemptId: response.attempt.id,
+                        evidence: { type: 'shadowing', attemptId: response.attempt.id },
                     });
                     setOutcome({ passed: reviewed.passed, score: reviewed.score });
                     applyEntryResult(selected.id, reviewed.score, reviewed.passed);

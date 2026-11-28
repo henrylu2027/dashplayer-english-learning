@@ -68,6 +68,13 @@ export default interface PracticeAttemptRepository {
     list(query: ListPracticeAttemptsQuery): Promise<PracticeAttemptSummary[]>;
 
     /**
+     * 按 ID 查询一条练习记录，供复习判定读取真实得分。
+     * @param id 记录 ID。
+     * @returns 记录摘要；不存在时返回 null。
+     */
+    findById(id: number): Promise<PracticeAttemptSummary | null>;
+
+    /**
      * 统计某个时间点之后的练习次数。
      * @param sinceMs 起始时间，epoch 毫秒（含）。
      * @returns 记录条数。

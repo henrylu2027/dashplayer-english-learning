@@ -22,7 +22,8 @@ import type { SettingsStore } from '@/backend/services/gateways/SettingsStore';
 import type SentenceAudioService from '@/backend/services/SentenceAudioService';
 import type SrsCardRepository from '@/backend/services/repositories/SrsCardRepository';
 import type ShadowingAttemptRepository from '@/backend/services/repositories/ShadowingAttemptRepository';
-import type { ShadowingAttemptDetail } from '@/backend/services/repositories/ShadowingAttemptRepository';
+import type PracticeAttemptRepository from '@/backend/services/repositories/PracticeAttemptRepository';
+import { resolveSrsReviewForm } from '@/common/utils/srsReviewForm';
 import { tokenizeForScoring } from '@/common/utils/wordTokens';
 import {
     buildSrsCardKey,
@@ -65,11 +66,14 @@ export default interface SrsService {
     overview(): Promise<SrsOverview>;
 
     /**
-     * 用一条跟读记录提交复习结果，并推进或回退复习阶段。
+     * 提交一次复习结果，并推进或回退复习阶段。
      *
-     * @param request 卡片 ID 与跟读记录 ID。
+     * 取证方式必须与卡片当前的复习形态一致：句子卡提交跟读或听写记录，
+     * 词卡自评是否记得；分数一律由后端从记录里读取。
+     *
+     * @param request 卡片 ID 与取证方式。
      * @returns 是否通过、本次得分与更新后的卡片。
-     * @throws 卡片/记录不存在，或记录与卡片不是同一句时抛出。
+     * @throws 卡片/记录不存在、取证方式不匹配，或记录与卡片不是同一句时抛出。
      */
     submitReview(request: SrsSubmitReviewRequest): Promise<SrsReviewOutcome>;
 
@@ -157,6 +161,9 @@ export class SrsServiceImpl implements SrsService {
 
     @inject(TYPES.ShadowingAttemptRepository)
     private shadowingAttemptRepository!: ShadowingAttemptRepository;
+
+    @inject(TYPES.PracticeAttemptRepository)
+    private practiceAttemptRepository!: PracticeAttemptRepository;
 
     @inject(TYPES.SentenceAudioService)
     private sentenceAudioService!: SentenceAudioService;
@@ -325,18 +332,18 @@ export class SrsServiceImpl implements SrsService {
 
     public async submitReview(request: SrsSubmitReviewRequest): Promise<SrsReviewOutcome> {
         this.assertPositiveInteger(request.cardId, '复习卡片 ID');
-        this.assertPositiveInteger(request.attemptId, '跟读记录 ID');
         const card = await this.srsCardRepository.findById(request.cardId);
         if (!card) {
             throw new Error(`复习卡片不存在: ${request.cardId}`);
         }
-        const attempt = await this.shadowingAttemptRepository.findById(request.attemptId);
-        if (!attempt) {
-            throw new Error(`跟读记录不存在: ${request.attemptId}`);
-        }
-        this.assertSameTarget(card, attempt);
 
-        const passed = attempt.score >= SRS_PASS_SCORE;
+        const form = resolveSrsReviewForm(card);
+        if (request.evidence.type !== form) {
+            throw new Error('这张卡的复习形态已变化，请刷新后重试');
+        }
+        const evidence = await this.collectEvidence(card, request.evidence);
+
+        const passed = evidence.passed;
         const now = Date.now();
         let stage: number;
         let intervalDays: number;
@@ -356,20 +363,71 @@ export class SrsServiceImpl implements SrsService {
             id: card.id,
             stage,
             dueAt,
-            lastScore: attempt.score,
-            lastAttemptId: attempt.id,
+            lastScore: evidence.score,
+            lastAttemptId: evidence.attemptId,
             passed,
         });
         this.logger.info('srs reviewed', {
             cardId: card.id,
-            attemptId: attempt.id,
-            score: attempt.score,
+            form,
+            attemptId: evidence.attemptId,
+            score: evidence.score,
             passed,
             previousStage: card.stage,
             stage,
             intervalDays,
         });
-        return { card: updated, passed, score: attempt.score, intervalDays };
+        return { card: updated, form, passed, score: evidence.score, intervalDays };
+    }
+
+    /**
+     * 按取证方式读取真实结果；前端提交的分数一概不采信。
+     *
+     * @param card 复习卡片。
+     * @param evidence 取证方式。
+     * @returns 是否通过、得分与跟读记录 ID（非跟读形态为 null）。
+     * @throws 记录不存在、模式不符或与卡片不是同一句时抛出。
+     */
+    private async collectEvidence(
+        card: SrsCard,
+        evidence: SrsSubmitReviewRequest['evidence'],
+    ): Promise<{ passed: boolean; score: number; attemptId: number | null }> {
+        if (evidence.type === 'recall') {
+            return {
+                passed: evidence.remembered,
+                score: evidence.remembered ? 100 : 0,
+                attemptId: null,
+            };
+        }
+        if (evidence.type === 'shadowing') {
+            this.assertPositiveInteger(evidence.attemptId, '跟读记录 ID');
+            const attempt = await this.shadowingAttemptRepository.findById(evidence.attemptId);
+            if (!attempt) {
+                throw new Error(`跟读记录不存在: ${evidence.attemptId}`);
+            }
+            this.assertSameTarget(card, attempt);
+            return {
+                passed: attempt.score >= SRS_PASS_SCORE,
+                score: attempt.score,
+                attemptId: attempt.id,
+            };
+        }
+
+        this.assertPositiveInteger(evidence.attemptId, '练习记录 ID');
+        const attempt = await this.practiceAttemptRepository.findById(evidence.attemptId);
+        if (!attempt) {
+            throw new Error(`练习记录不存在: ${evidence.attemptId}`);
+        }
+        if (attempt.mode !== 'dictation') {
+            throw new Error('听写复习必须提交听写记录');
+        }
+        this.assertSameTarget(card, attempt);
+        return {
+            passed: attempt.score >= SRS_PASS_SCORE,
+            score: attempt.score,
+            // 听写记录属于练习表，不写进 last_attempt_id，避免和跟读记录混用
+            attemptId: null,
+        };
     }
 
     public async removeCard(cardId: number): Promise<void> {
@@ -398,20 +456,30 @@ export class SrsServiceImpl implements SrsService {
     }
 
     /**
-     * 校验跟读记录与卡片指向同一句，避免用别的句子的录音把卡片“刷”过去。
+     * 校验记录与卡片指向同一句，避免用别的句子的成绩把卡片“刷”过去。
+     *
+     * 跟读记录与听写记录都满足这个结构，来源与文本判定完全一致。
      *
      * @param card 复习卡片。
-     * @param attempt 跟读记录。
+     * @param attempt 跟读或听写记录。
      * @throws 两者来源或文本不一致时抛出。
      */
-    private assertSameTarget(card: SrsCard, attempt: ShadowingAttemptDetail): void {
+    private assertSameTarget(
+        card: SrsCard,
+        attempt: {
+            sourceKind: 'free' | 'video';
+            videoKey: string | null;
+            sentenceIndex: number | null;
+            referenceText: string;
+        },
+    ): void {
         if (card.sourceKind === 'video') {
             if (
                 attempt.sourceKind !== 'video'
                 || attempt.videoKey !== card.videoKey
                 || attempt.sentenceIndex !== card.sentenceIndex
             ) {
-                throw new Error('这次跟读与复习卡片不是同一句，请重新朗读');
+                throw new Error('这次作答与复习卡片不是同一句，请重新作答');
             }
             return;
         }
@@ -419,7 +487,7 @@ export class SrsServiceImpl implements SrsService {
             attempt.sourceKind !== 'free'
             || normalizedTextKey(attempt.referenceText) !== normalizedTextKey(card.referenceText)
         ) {
-            throw new Error('这次跟读与复习卡片不是同一句，请重新朗读');
+            throw new Error('这次作答与复习卡片不是同一句，请重新作答');
         }
     }
 

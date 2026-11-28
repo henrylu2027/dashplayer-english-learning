@@ -128,12 +128,25 @@ export class PracticeServiceImpl implements PracticeService {
             correctWordCount: alignment.correctWordCount,
             accuracy,
         });
-        await this.ingestToReview(referenceText, source, accuracy);
-        const grade = await this.gradeQuietly({
-            referenceText,
-            learnerText: typedText,
-            mode: 'dictation',
-        });
+        // 复习场景只取准确率：不再入池（避免复习动作反过来改写来源），也不调模型点评
+        if (!request.forReview) {
+            await this.ingestToReview(referenceText, source, accuracy);
+        }
+        const grade = request.forReview
+            ? {
+                grammarScore: null,
+                pronunciationScore: null,
+                similarityScore: null,
+                grammarIssues: [],
+                vocab: [],
+                graderNote: null,
+                graderError: null,
+            }
+            : await this.gradeQuietly({
+                referenceText,
+                learnerText: typedText,
+                mode: 'dictation',
+            });
         return {
             attempt,
             words: alignment.words,

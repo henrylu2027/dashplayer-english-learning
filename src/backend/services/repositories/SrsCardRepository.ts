@@ -53,8 +53,8 @@ export interface UpdateSrsCardReviewParams {
     dueAt: number;
     /** 本次跟读得分。 */
     lastScore: number;
-    /** 本次跟读记录 ID。 */
-    lastAttemptId: number;
+    /** 本次跟读记录 ID；听写与认词没有跟读记录时为 null。 */
+    lastAttemptId: number | null;
     /** 本次是否通过，用于累计通过次数。 */
     passed: boolean;
 }

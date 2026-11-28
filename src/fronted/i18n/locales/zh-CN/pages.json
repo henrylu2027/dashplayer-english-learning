@@ -353,7 +353,17 @@
         "limitPausedHint": "填 0 表示暂停新卡入池，新学的句子只排队",
         "limitSaved": "每日新卡上限已改为 {{limit}}",
         "limitInvalid": "上限需为 0~{{max}} 的整数",
-        "limitSaveFailed": "保存每日新卡上限失败"
+        "limitSaveFailed": "保存每日新卡上限失败",
+        "formShadowing": "跟读",
+        "formDictation": "听写",
+        "formRecall": "认词",
+        "dictationPrompt": "听原声，把整句写下来；词准确率 ≥ 80 分通过",
+        "dictationPlaceholder": "在这里输入听到的句子",
+        "dictationSubmit": "提交听写",
+        "dictationResult": "词准确率 {{score}} 分",
+        "recallHint": "看词想义，按真实情况选择；自评只影响这个词的复习间隔",
+        "recallRemembered": "记得",
+        "recallForgot": "不记得"
     },
     "dashboard": {
         "title": "学习台",

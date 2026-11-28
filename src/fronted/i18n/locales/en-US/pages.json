@@ -353,7 +353,17 @@
         "limitPausedHint": "Set to 0 to pause new cards; new sentences wait in the queue",
         "limitSaved": "Daily new-card limit set to {{limit}}",
         "limitInvalid": "Limit must be an integer between 0 and {{max}}",
-        "limitSaveFailed": "Failed to save the daily limit"
+        "limitSaveFailed": "Failed to save the daily limit",
+        "formShadowing": "Shadowing",
+        "formDictation": "Dictation",
+        "formRecall": "Recall",
+        "dictationPrompt": "Listen and type the whole sentence; pass at 80% word accuracy",
+        "dictationPlaceholder": "Type what you hear",
+        "dictationSubmit": "Submit dictation",
+        "dictationResult": "Word accuracy {{score}}",
+        "recallHint": "Recall the meaning, then answer honestly; self-report only affects this word's interval",
+        "recallRemembered": "I remember",
+        "recallForgot": "Forgot"
     },
     "dashboard": {
         "title": "Dashboard",

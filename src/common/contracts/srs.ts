@@ -40,6 +40,15 @@ export const SRS_MAX_DAILY_NEW_CARD_LIMIT = 200;
 export type SrsSourceModule = 'player' | 'original' | 'practice' | 'dialogue' | 'vocabulary';
 
 /**
+ * 复习形态。
+ *
+ * - `shadowing`：听原声后跟读，按跟读综合分判定；
+ * - `dictation`：听原声后听写整句，按词准确率判定；
+ * - `recall`：只看单词自评是否记得，用于没有语境的词卡。
+ */
+export type SrsReviewForm = 'shadowing' | 'dictation' | 'recall';
+
+/**
  * 一张间隔复习卡片。
  */
 export interface SrsCard {
@@ -150,13 +159,39 @@ export interface SrsIngestResponse {
 }
 
 /**
+ * 一次复习的取证方式。
+ *
+ * 前端不能自行声明分数：机器可评的形态必须提交已落库的记录 ID，
+ * 只有认词允许自评。
+ */
+export type SrsReviewEvidence =
+    | {
+        /** 跟读形态：提交跟读记录。 */
+        type: 'shadowing';
+        /** 跟读记录 ID。 */
+        attemptId: number;
+    }
+    | {
+        /** 听写形态：提交听写记录。 */
+        type: 'dictation';
+        /** 练习记录 ID，必须是听写模式。 */
+        attemptId: number;
+    }
+    | {
+        /** 认词形态：自评是否记得。 */
+        type: 'recall';
+        /** 本次是否记得。 */
+        remembered: boolean;
+    };
+
+/**
  * 提交一次复习结果。
  */
 export interface SrsSubmitReviewRequest {
     /** 复习卡片 ID。 */
     cardId: number;
-    /** 本次复习对应的跟读记录 ID；得分与来源都以这条记录为准。 */
-    attemptId: number;
+    /** 本次复习的取证方式。 */
+    evidence: SrsReviewEvidence;
 }
 
 /**
@@ -165,6 +200,8 @@ export interface SrsSubmitReviewRequest {
 export interface SrsReviewOutcome {
     /** 更新后的卡片。 */
     card: SrsCard;
+    /** 本次使用的复习形态。 */
+    form: SrsReviewForm;
     /** 本次是否通过。 */
     passed: boolean;
     /** 本次跟读综合分。 */

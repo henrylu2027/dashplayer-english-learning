@@ -81,6 +81,15 @@ export default class PracticeAttemptRepositoryImpl implements PracticeAttemptRep
         return rows.map(mapRow);
     }
 
+    public async findById(id: number): Promise<PracticeAttemptSummary | null> {
+        const row = db
+            .select()
+            .from(practiceAttempt)
+            .where(eq(practiceAttempt.id, id))
+            .get();
+        return row ? mapRow(row) : null;
+    }
+
     public async summarySince(sinceMs: number): Promise<PracticeAttemptStats> {
         const row = db
             .select({ count: sql<number>`count(*)` })
