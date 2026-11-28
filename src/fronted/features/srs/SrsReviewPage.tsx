@@ -273,6 +273,7 @@ export default function SrsReviewPage() {
                     verdict: result.verdict,
                     intervalDays: result.intervalDays,
                     mastered: result.mastered,
+                    errorTags: result.errorTags,
                     at: Date.now(),
                 },
             ]);

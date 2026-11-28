@@ -8,6 +8,7 @@ import { srsReviewLog } from '@/backend/infrastructure/db/tables/srsReviewLog';
 import type { ShadowingSourceKind } from '@/common/contracts/shadowing';
 import type {
     SrsCard,
+    SrsErrorTag,
     SrsOverview,
     SrsQueueFilter,
     SrsQueueResponse,
@@ -29,6 +30,26 @@ const SOURCE_KINDS: readonly ShadowingSourceKind[] = ['free', 'video'];
 
 /** 合法的学习来源模块；未知值读取时丢弃，避免旧数据撑爆界面。 */
 const SOURCE_MODULES: readonly SrsSourceModule[] = ['player', 'original', 'practice', 'dialogue', 'vocabulary'];
+
+/** 合法的错误标签；未知值读取时丢弃。 */
+const ERROR_TAGS: readonly SrsErrorTag[] = [
+    'pronunciation', 'stress', 'fluency', 'spelling', 'tense',
+    'plural', 'missing', 'extra', 'meaning', 'structure',
+];
+
+/**
+ * 解析逗号分隔的错误标签。
+ * @param value 数据库里的标签串。
+ */
+function parseErrorTags(value: string | null): SrsErrorTag[] {
+    if (!value) {
+        return [];
+    }
+    return value
+        .split(',')
+        .map((item) => item.trim())
+        .filter((item): item is SrsErrorTag => ERROR_TAGS.includes(item as SrsErrorTag));
+}
 
 /**
  * 解析逗号分隔的来源模块。
@@ -474,7 +495,7 @@ export default class SrsCardRepositoryImpl implements SrsCardRepository {
                 score: entry.score,
                 passed: entry.passed === null ? null : (entry.passed ? 1 : 0),
                 verdict: entry.verdict,
-                error_tags: entry.errorTags,
+                error_tags: entry.errorTags.join(','),
                 created_at: entry.createdAt,
             })
             .run();
@@ -495,7 +516,7 @@ export default class SrsCardRepositoryImpl implements SrsCardRepository {
                 score: row.score,
                 passed: row.passed === null ? null : row.passed === 1,
                 verdict: row.verdict as SrsVerdict,
-                errorTags: row.error_tags,
+                errorTags: parseErrorTags(row.error_tags),
                 createdAt: row.created_at,
             }));
     }

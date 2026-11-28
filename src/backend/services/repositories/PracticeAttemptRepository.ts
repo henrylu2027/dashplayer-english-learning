@@ -75,6 +75,13 @@ export default interface PracticeAttemptRepository {
     findById(id: number): Promise<PracticeAttemptSummary | null>;
 
     /**
+     * 读取一条练习记录的逐词反馈，供复习判定生成错误标签。
+     * @param id 记录 ID。
+     * @returns 逐词反馈；记录不存在或内容损坏时为空数组。
+     */
+    findWordFeedback(id: number): Promise<ShadowingWordFeedback[]>;
+
+    /**
      * 统计某个时间点之后的练习次数。
      * @param sinceMs 起始时间，epoch 毫秒（含）。
      * @returns 记录条数。

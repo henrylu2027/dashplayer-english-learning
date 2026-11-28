@@ -96,6 +96,7 @@ import type {
     SrsAddCardRequest,
     SrsAddCardResponse,
     SrsCardLocation,
+    SrsCardThumbnail,
     SrsCheckRequest,
     SrsCheckResult,
     SrsHistoryRequest,
@@ -593,6 +594,7 @@ interface SrsDef {
     'srs/remove-card': { params: { cardId: number }, return: void };
     'srs/sentence-audio': { params: { cardId: number }, return: string };
     'srs/card-location': { params: { cardId: number }, return: SrsCardLocation };
+    'srs/card-thumbnail': { params: { cardId: number }, return: SrsCardThumbnail };
     'srs/word-definition': { params: { cardId: number }, return: SrsWordDefinition };
     'srs/history': { params: SrsHistoryRequest, return: SrsHistoryResponse };
     'srs/set-daily-limit': { params: { limit: number }, return: number };

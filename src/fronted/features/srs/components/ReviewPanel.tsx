@@ -7,6 +7,7 @@ import { Eye, EyeOff, Loader2, Mic, Play, Square, Volume2 } from 'lucide-react';
 import type {
     SrsCard,
     SrsCheckResult,
+    SrsErrorTag,
     SrsReviewEvidence,
     SrsReviewForm,
     SrsSourceModule,
@@ -21,6 +22,7 @@ import { getRendererLogger } from '@/fronted/log/simple-logger';
 import { cn } from '@/fronted/lib/utils';
 import ScorePanel from '@/fronted/features/shadowing/components/ScorePanel';
 import { shadowingSourceFromCard } from '@/fronted/features/shadowing/shadowingSource';
+import { useAudioRecorder } from '@/fronted/features/shadowing/useAudioRecorder';
 import { useShadowingRecorder } from '@/fronted/features/shadowing/useShadowingRecorder';
 import { practiceApi } from '@/fronted/features/practice/practiceApi';
 import { srsApi } from '../srsApi';
@@ -36,6 +38,21 @@ const FORM_LABEL: Record<SrsReviewForm, string> = {
     dictation: 'srs.formDictation',
     recall: 'srs.formRecall',
     vocab: 'srs.formVocab',
+    scenario: 'srs.formScenario',
+};
+
+/** 错误标签文案键。 */
+const TAG_LABEL: Record<SrsErrorTag, string> = {
+    pronunciation: 'srs.tagPronunciation',
+    stress: 'srs.tagStress',
+    fluency: 'srs.tagFluency',
+    spelling: 'srs.tagSpelling',
+    tense: 'srs.tagTense',
+    plural: 'srs.tagPlural',
+    missing: 'srs.tagMissing',
+    extra: 'srs.tagExtra',
+    meaning: 'srs.tagMeaning',
+    structure: 'srs.tagStructure',
 };
 
 /** 来源模块文案键。 */
@@ -109,10 +126,34 @@ export default function ReviewPanel({ card, onSubmit }: ReviewPanelProps) {
     // 听写形态的输入与逐词反馈
     const [typed, setTyped] = useState('');
     const [dictationWords, setDictationWords] = useState<ShadowingWordFeedback[]>([]);
+    // 情景复述的逐词反馈
+    const [retellWords, setRetellWords] = useState<ShadowingWordFeedback[]>([]);
 
     const canListen = hasSrsAudio(card);
     /** 定位「回到原片」请求进行中。 */
     const [locating, setLocating] = useState(false);
+    /** 卡片对应句子的视频截图；截帧失败或没有原声时为 null。 */
+    const [thumbnail, setThumbnail] = useState<string | null>(null);
+
+    // 视频卡挂载时生成一次截图，失败只记日志，不影响复习
+    useEffect(() => {
+        if (!canListen) {
+            return undefined;
+        }
+        let cancelled = false;
+        srsApi.cardThumbnail(card.id)
+            .then((result) => {
+                if (!cancelled) {
+                    setThumbnail(result.filePath);
+                }
+            })
+            .catch((error) => {
+                logger.warn('生成视频截图失败', { error, cardId: card.id });
+            });
+        return () => {
+            cancelled = true;
+        };
+    }, [canListen, card.id]);
 
     /** 跳到播放器并 seek 到本句开头。 */
     const goToSource = async (): Promise<void> => {
@@ -170,6 +211,37 @@ export default function ReviewPanel({ card, onSubmit }: ReviewPanelProps) {
             })
             .finally(() => setSubmitting(false));
     }, [recorder.lastAttempt, form, card.id, reportReady, t]);
+
+    /** 情景复述：录音结束后提交复述评测，再按记录打分。 */
+    const handleRetellStop = useCallback(async (blob: Blob): Promise<void> => {
+        setSubmitting(true);
+        setSubmitError(null);
+        try {
+            const buffer = await blob.arrayBuffer();
+            const result = await practiceApi.retell({
+                referenceText: card.referenceText,
+                source: shadowingSourceFromCard(card),
+                audio: new Uint8Array(buffer),
+                mimeType: blob.type || 'audio/webm',
+            });
+            setRetellWords(result.words);
+            const evidence: SrsReviewEvidence = { type: 'retell', attemptId: result.attempt.id };
+            const scored = await srsApi.check({ cardId: card.id, evidence });
+            setCheck(scored);
+            reportReady(scored, evidence);
+        } catch (retellError) {
+            logger.error('复述复习失败', { error: retellError, cardId: card.id });
+            setSubmitError(retellError instanceof Error ? retellError.message : t('srs.submitFailed'));
+        } finally {
+            setSubmitting(false);
+        }
+    }, [card, reportReady, t]);
+
+    const retellRecorder = useAudioRecorder({
+        onStop: (blob) => {
+            void handleRetellStop(blob);
+        },
+    });
 
     const isRecording = recorder.phase === 'recording';
     const isScoring = recorder.phase === 'scoring';
@@ -275,12 +347,26 @@ export default function ReviewPanel({ card, onSubmit }: ReviewPanelProps) {
                     {card.lastScore !== null && (
                         <span>{t('srs.lastScore', { score: card.lastScore })}</span>
                     )}
+                    {canListen && thumbnail && (
+                        <button
+                            type="button"
+                            onClick={() => void goToSource()}
+                            title={t('srs.sourcePreview')}
+                            className="ml-auto shrink-0 overflow-hidden rounded-md border border-border/60 transition-opacity hover:opacity-80"
+                        >
+                            <img
+                                src={UrlUtil.toUrl(thumbnail)}
+                                alt={t('srs.sourcePreview')}
+                                className="h-11 w-[78px] object-cover"
+                            />
+                        </button>
+                    )}
                     {canListen && (
                         <Button
                             type="button"
                             size="sm"
                             variant="outline"
-                            className="ml-auto h-7 rounded-lg px-2.5 text-[11px]"
+                            className={cn('h-7 rounded-lg px-2.5 text-[11px]', !thumbnail && 'ml-auto')}
                             disabled={locating}
                             onClick={() => void goToSource()}
                         >
@@ -469,6 +555,88 @@ export default function ReviewPanel({ card, onSubmit }: ReviewPanelProps) {
                     </div>
                 )}
 
+                {form === 'scenario' && (
+                    <div className="flex flex-col gap-4">
+                        <p className="text-xs text-muted-foreground">{t('srs.scenarioHint')}</p>
+                        <div className="flex flex-wrap items-center gap-2">
+                            <Button
+                                type="button"
+                                size="sm"
+                                variant="outline"
+                                className="h-8 rounded-lg px-3 text-xs"
+                                disabled={!canListen || audioPhase === 'loading' || retellRecorder.phase === 'recording'}
+                                onClick={() => void toggleAudio()}
+                            >
+                                {audioPhase === 'loading' ? (
+                                    <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
+                                ) : (
+                                    <Volume2 className="mr-1 h-3.5 w-3.5" />
+                                )}
+                                {audioPhase === 'playing' ? t('srs.stopAudio') : t('srs.listen')}
+                            </Button>
+                        </div>
+                        <div className="flex flex-col items-center gap-2 border-t border-border/50 pt-4">
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    if (retellRecorder.phase === 'recording') {
+                                        retellRecorder.stop();
+                                        return;
+                                    }
+                                    void retellRecorder.start();
+                                }}
+                                disabled={submitting}
+                                aria-label={t('shadowing.startRecording')}
+                                className={cn(
+                                    'relative flex h-16 w-16 items-center justify-center rounded-full transition-all',
+                                    'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background',
+                                    retellRecorder.phase === 'recording'
+                                        ? 'bg-red-500 text-white shadow-lg shadow-red-500/30'
+                                        : 'bg-primary text-primary-foreground hover:scale-105',
+                                    submitting && 'cursor-not-allowed opacity-60',
+                                )}
+                            >
+                                {retellRecorder.phase === 'recording' && (
+                                    <span className="pointer-events-none absolute inset-0 animate-ping rounded-full bg-red-500/20" />
+                                )}
+                                {retellRecorder.phase === 'recording'
+                                    ? <Square className="h-5 w-5 fill-current" />
+                                    : submitting
+                                        ? <Loader2 className="h-6 w-6 animate-spin" />
+                                        : <Mic className="h-6 w-6" />}
+                            </button>
+                            <div className="h-5 text-sm text-muted-foreground">
+                                {retellRecorder.phase === 'recording'
+                                    ? t('shadowing.recording', { time: formatElapsed(retellRecorder.elapsedSec) })
+                                    : submitting
+                                        ? t('srs.submitting')
+                                        : check !== null
+                                            ? t('srs.verdictHint')
+                                            : t('srs.scenarioIdle')}
+                            </div>
+                        </div>
+                        {retellRecorder.error && (
+                            <div className="rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-500">
+                                {retellRecorder.error}
+                            </div>
+                        )}
+                        {retellWords.length > 0 && (
+                            <>
+                                <div className="flex flex-wrap gap-x-1 gap-y-0.5 border-t border-border/50 pt-3 text-sm">
+                                    {retellWords
+                                        .filter((word) => word.status !== 'extra')
+                                        .map((word, index) => (
+                                            <span key={`${index}-${word.expected ?? word.actual}`} className={WORD_CLASS[word.status]}>
+                                                {word.expected ?? word.actual}
+                                            </span>
+                                        ))}
+                                </div>
+                                <p className="text-sm text-foreground">{card.referenceText}</p>
+                            </>
+                        )}
+                    </div>
+                )}
+
                 {form === 'vocab' && (
                     <div className="flex flex-col gap-4">
                         <div className="rounded-xl bg-muted/40 px-4 py-5 text-center">
@@ -527,7 +695,19 @@ export default function ReviewPanel({ card, onSubmit }: ReviewPanelProps) {
                             : 'border-amber-500/30 bg-amber-500/10 text-amber-600 dark:text-amber-400',
                     )}
                 >
-                    {t('srs.checkResult', { score: check.score, passLine: check.passLine })}
+                    <div>{t('srs.checkResult', { score: check.score, passLine: check.passLine })}</div>
+                    {check.errorTags.length > 0 && (
+                        <div className="mt-1 flex flex-wrap gap-1">
+                            {check.errorTags.map((tag) => (
+                                <span
+                                    key={tag}
+                                    className="rounded-full bg-black/5 px-1.5 py-0.5 text-[11px] dark:bg-white/10"
+                                >
+                                    {t(TAG_LABEL[tag])}
+                                </span>
+                            ))}
+                        </div>
+                    )}
                 </div>
             )}
         </section>

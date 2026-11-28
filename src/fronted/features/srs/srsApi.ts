@@ -2,6 +2,7 @@ import type {
     SrsAddCardRequest,
     SrsAddCardResponse,
     SrsCardLocation,
+    SrsCardThumbnail,
     SrsCheckRequest,
     SrsCheckResult,
     SrsHistoryRequest,
@@ -56,6 +57,10 @@ export const srsApi = {
     /** 定位卡片对应的原片与句子起始时间。 */
     cardLocation: (cardId: number): Promise<SrsCardLocation> =>
         backendClient.call('srs/card-location', { cardId }),
+
+    /** 生成并返回卡片对应句子的视频截图。 */
+    cardThumbnail: (cardId: number): Promise<SrsCardThumbnail> =>
+        backendClient.call('srs/card-thumbnail', { cardId }),
 
     /** 读取卡片目标词在词表里的释义。 */
     wordDefinition: (cardId: number): Promise<SrsWordDefinition> =>

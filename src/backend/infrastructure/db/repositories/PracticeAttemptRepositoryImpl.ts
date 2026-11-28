@@ -4,6 +4,7 @@ import { injectable } from 'inversify';
 import db from '@/backend/infrastructure/db';
 import { practiceAttempt, type PracticeAttemptRow } from '@/backend/infrastructure/db/tables/practiceAttempt';
 import type { PracticeAttemptSummary, PracticeMode } from '@/common/contracts/practice';
+import type { ShadowingWordFeedback } from '@/common/contracts/shadowing';
 import type PracticeAttemptRepository from '@/backend/services/repositories/PracticeAttemptRepository';
 import type {
     CreatePracticeAttemptParams,
@@ -88,6 +89,23 @@ export default class PracticeAttemptRepositoryImpl implements PracticeAttemptRep
             .where(eq(practiceAttempt.id, id))
             .get();
         return row ? mapRow(row) : null;
+    }
+
+    public async findWordFeedback(id: number): Promise<ShadowingWordFeedback[]> {
+        const row = db
+            .select({ word_feedback: practiceAttempt.word_feedback })
+            .from(practiceAttempt)
+            .where(eq(practiceAttempt.id, id))
+            .get();
+        if (!row?.word_feedback) {
+            return [];
+        }
+        try {
+            const parsed = JSON.parse(row.word_feedback);
+            return Array.isArray(parsed) ? parsed as ShadowingWordFeedback[] : [];
+        } catch {
+            return [];
+        }
     }
 
     public async summarySince(sinceMs: number): Promise<PracticeAttemptStats> {

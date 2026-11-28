@@ -30,6 +30,7 @@ const FORM_LABEL: Record<SrsReviewForm, string> = {
     dictation: 'srs.formDictation',
     recall: 'srs.formRecall',
     vocab: 'srs.formVocab',
+    scenario: 'srs.formScenario',
 };
 
 /**

@@ -23,6 +23,7 @@ export default class SrsController implements Controller {
         registerRoute('srs/remove-card', (p) => this.srsService.removeCard(p.cardId));
         registerRoute('srs/sentence-audio', (p) => this.srsService.getSentenceAudio(p.cardId));
         registerRoute('srs/card-location', (p) => this.srsService.getCardLocation(p.cardId));
+        registerRoute('srs/card-thumbnail', (p) => this.srsService.getCardThumbnail(p.cardId));
         registerRoute('srs/word-definition', (p) => this.srsService.getWordDefinition(p.cardId));
         registerRoute('srs/history', (p) => this.srsService.history(p ?? {}));
         registerRoute('srs/set-daily-limit', (p) => this.srsService.setDailyNewCardLimit(p.limit));

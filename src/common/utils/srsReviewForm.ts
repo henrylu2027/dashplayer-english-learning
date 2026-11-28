@@ -5,7 +5,7 @@ import type { SrsCard, SrsReviewForm } from '@/common/contracts/srs';
  */
 export type SrsReviewCardShape = Pick<
     SrsCard,
-    'stage' | 'word' | 'referenceText' | 'sourceKind' | 'videoPath' | 'subtitlePath'
+    'stage' | 'word' | 'referenceText' | 'sourceKind' | 'videoPath' | 'subtitlePath' | 'sourceModules'
 >;
 
 /**
@@ -49,6 +49,10 @@ export function resolveSrsReviewForm(card: SrsReviewCardShape): SrsReviewForm {
     }
     if (card.word?.trim()) {
         return 'vocab';
+    }
+    // 场景对话来源的句子固定走口头复述
+    if (card.sourceModules.includes('dialogue')) {
+        return 'scenario';
     }
     if (hasSrsAudio(card)) {
         if (card.stage <= 1) {

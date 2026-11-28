@@ -45,14 +45,32 @@ export type SrsSourceModule = 'player' | 'original' | 'practice' | 'dialogue' | 
  * - `shadowing`：听原声后跟读，按跟读综合分判定；
  * - `dictation`：听原声后听写整句，按词准确率判定；
  * - `recall`：听原声后回忆整句，显示原文后自评；
- * - `vocab`：看目标词回忆词义，展开释义与原句，固定形态。
+ * - `vocab`：看目标词回忆词义，展开释义与原句，固定形态；
+ * - `scenario`：场景对话来源的句子，口头复述后比对关键词覆盖，固定形态。
  */
-export type SrsReviewForm = 'shadowing' | 'dictation' | 'recall' | 'vocab';
+export type SrsReviewForm = 'shadowing' | 'dictation' | 'recall' | 'vocab' | 'scenario';
 
 /**
  * 掌握度判定。底部三按钮定方向，机器分只在跟读/听写形态下封顶。
  */
 export type SrsVerdict = 'forgot' | 'fuzzy' | 'known';
+
+/**
+ * 复习错误标签。
+ *
+ * 只由机器评分里能确定的部分产生；暂时不做人工补标。
+ */
+export type SrsErrorTag =
+    | 'pronunciation'
+    | 'stress'
+    | 'fluency'
+    | 'spelling'
+    | 'tense'
+    | 'plural'
+    | 'missing'
+    | 'extra'
+    | 'meaning'
+    | 'structure';
 
 /**
  * 一张间隔复习卡片。
@@ -198,6 +216,12 @@ export type SrsReviewEvidence =
         type: 'recall';
         /** 本次是否记得。 */
         remembered: boolean;
+    }
+    | {
+        /** 情景复述形态：提交复述记录。 */
+        type: 'retell';
+        /** 练习记录 ID，必须是复述模式。 */
+        attemptId: number;
     };
 
 /**
@@ -252,6 +276,8 @@ export interface SrsCheckResult {
     passed: boolean | null;
     /** 通过线。 */
     passLine: number;
+    /** 本次评分得到的错误标签。 */
+    errorTags: SrsErrorTag[];
 }
 
 /**
@@ -284,6 +310,8 @@ export interface SrsVerdictResult {
     intervalDays: number;
     /** 本次判定是否把卡片标记为已掌握。 */
     mastered: boolean;
+    /** 本次评分得到的错误标签。 */
+    errorTags: SrsErrorTag[];
 }
 
 /**
@@ -347,6 +375,14 @@ export interface SrsCardLocation {
 }
 
 /**
+ * 卡片对应的视频截图。
+ */
+export interface SrsCardThumbnail {
+    /** 截图文件绝对路径，供渲染进程显示。 */
+    filePath: string;
+}
+
+/**
  * 一条历史复习记录。
  */
 export interface SrsHistoryItem {
@@ -364,6 +400,8 @@ export interface SrsHistoryItem {
     passed: boolean | null;
     /** 用户判定。 */
     verdict: SrsVerdict;
+    /** 本次评分得到的错误标签。 */
+    errorTags: SrsErrorTag[];
     /** 判定时间，epoch 毫秒。 */
     createdAt: number;
 }

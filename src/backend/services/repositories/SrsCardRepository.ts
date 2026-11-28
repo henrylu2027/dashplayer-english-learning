@@ -1,6 +1,7 @@
 import type { ShadowingAttemptSource } from '@/common/contracts/shadowing';
 import type {
     SrsCard,
+    SrsErrorTag,
     SrsOverview,
     SrsQueueFilter,
     SrsQueueResponse,
@@ -104,8 +105,8 @@ export interface SrsReviewLogEntry {
     passed: boolean | null;
     /** 用户判定。 */
     verdict: SrsVerdict;
-    /** 错误标签，逗号分隔。 */
-    errorTags: string;
+    /** 错误标签。 */
+    errorTags: SrsErrorTag[];
     /** 判定时间，epoch 毫秒。 */
     createdAt: number;
 }

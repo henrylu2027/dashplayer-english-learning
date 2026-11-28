@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next';
 import toast from 'react-hot-toast';
 import { ChevronDown, ChevronUp, History, Loader2 } from 'lucide-react';
 
-import type { SrsHistoryItem, SrsReviewForm, SrsVerdict } from '@/common/contracts/srs';
+import type { SrsErrorTag, SrsHistoryItem, SrsReviewForm, SrsVerdict } from '@/common/contracts/srs';
 import { getRendererLogger } from '@/fronted/log/simple-logger';
 import { cn } from '@/fronted/lib/utils';
 import { srsApi } from '../srsApi';
@@ -26,6 +26,8 @@ export interface ArchiveItem {
     intervalDays: number;
     /** 是否标记为已掌握。 */
     mastered: boolean;
+    /** 本次评分得到的错误标签。 */
+    errorTags: SrsErrorTag[];
     /** 判定时间，epoch 毫秒。 */
     at: number;
 }
@@ -36,6 +38,7 @@ const FORM_LABEL: Record<SrsReviewForm, string> = {
     dictation: 'srs.formDictation',
     recall: 'srs.formRecall',
     vocab: 'srs.formVocab',
+    scenario: 'srs.formScenario',
 };
 
 /** 判定文案键。 */

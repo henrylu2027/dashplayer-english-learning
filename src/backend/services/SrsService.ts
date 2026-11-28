@@ -1,3 +1,4 @@
+import { createHash } from 'crypto';
 import path from 'path';
 import { inject, injectable } from 'inversify';
 import TYPES from '@/backend/ioc/types';
@@ -7,8 +8,10 @@ import type {
     SrsAddCardResponse,
     SrsCard,
     SrsCardLocation,
+    SrsCardThumbnail,
     SrsCheckRequest,
     SrsCheckResult,
+    SrsErrorTag,
     SrsHistoryItem,
     SrsHistoryRequest,
     SrsHistoryResponse,
@@ -33,7 +36,7 @@ import {
     SRS_MAX_DAILY_NEW_CARD_LIMIT,
     SRS_PASS_SCORE,
 } from '@/common/contracts/srs';
-import type { ShadowingAttemptSource } from '@/common/contracts/shadowing';
+import type { ShadowingAttemptSource, ShadowingWordFeedback } from '@/common/contracts/shadowing';
 import type { SettingsStore } from '@/backend/services/gateways/SettingsStore';
 import type SentenceAudioService from '@/backend/services/SentenceAudioService';
 import type SrsCardRepository from '@/backend/services/repositories/SrsCardRepository';
@@ -41,6 +44,10 @@ import type WatchHistoryRepository from '@/backend/services/repositories/WatchHi
 import type WordsRepository from '@/backend/services/repositories/WordsRepository';
 import { WatchHistoryProjectType } from '@/backend/services/repositories/WatchHistoryRepository';
 import type SubtitleService from '@/backend/services/SubtitleService';
+import type FfmpegService from '@/backend/services/FfmpegService';
+import type StorageDirectoryProvider from '@/backend/services/gateways/storage/StorageDirectoryProvider';
+import { StorageDirectoryTarget } from '@/backend/services/gateways/storage/StorageDirectoryProvider';
+import type FileSystemGateway from '@/backend/services/gateways/storage/FileSystemGateway';
 import type ShadowingAttemptRepository from '@/backend/services/repositories/ShadowingAttemptRepository';
 import type PracticeAttemptRepository from '@/backend/services/repositories/PracticeAttemptRepository';
 import { resolveSrsReviewForm } from '@/common/utils/srsReviewForm';
@@ -148,6 +155,15 @@ export default interface SrsService {
     getCardLocation(cardId: number): Promise<SrsCardLocation>;
 
     /**
+     * 生成卡片对应句子的视频截图（缓存为 jpg）。
+     *
+     * @param cardId 卡片 ID。
+     * @returns 截图文件绝对路径。
+     * @throws 卡片没有原声或截帧失败时抛出。
+     */
+    getCardThumbnail(cardId: number): Promise<SrsCardThumbnail>;
+
+    /**
      * 读取最近的复习日志，供存档区的历史视图使用。
      *
      * @param request 返回条数。
@@ -240,6 +256,62 @@ function isSourcelessWord(
 }
 
 /**
+ * 由逐词反馈生成错误标签。
+ *
+ * 只标注机器能确定的问题；分低但没有具体错词时，跟读记为流利度不足、听写记为拼写错误。
+ *
+ * @param form 本次形态。
+ * @param score 机器分。
+ * @param words 逐词对齐结果。
+ */
+function deriveErrorTags(
+    form: 'shadowing' | 'dictation',
+    score: number,
+    words: ShadowingWordFeedback[],
+): SrsErrorTag[] {
+    const tags: SrsErrorTag[] = [];
+    const has = (status: ShadowingWordFeedback['status']): boolean =>
+        words.some((word) => word.status === status);
+
+    if (has('mispronounced')) {
+        tags.push(form === 'dictation' ? 'spelling' : 'pronunciation');
+    }
+    if (has('missing')) {
+        tags.push('missing');
+    }
+    if (has('extra')) {
+        tags.push('extra');
+    }
+    if (score < 60 && tags.length === 0) {
+        tags.push(form === 'dictation' ? 'spelling' : 'fluency');
+    }
+    return tags;
+}
+
+/**
+ * 由复述的逐词对齐生成错误标签。
+ *
+ * @param score 关键词覆盖率。
+ * @param words 逐词对齐结果。
+ */
+function deriveRetellTags(score: number, words: ShadowingWordFeedback[]): SrsErrorTag[] {
+    const tags: SrsErrorTag[] = [];
+    if (words.some((word) => word.status === 'missing')) {
+        tags.push('missing');
+    }
+    if (words.some((word) => word.status === 'extra')) {
+        tags.push('extra');
+    }
+    if (score < 60 && tags.length === 0) {
+        tags.push('structure');
+    }
+    return tags;
+}
+
+/** 需要提交机器评分的形态。 */
+const SCORED_FORMS: readonly SrsReviewForm[] = ['shadowing', 'dictation', 'scenario'];
+
+/**
  * 一次判定后的排期结果。
  */
 interface ScheduleDecision {
@@ -274,7 +346,7 @@ function decideSchedule(
     machinePassed: boolean | null,
     now: number,
 ): ScheduleDecision {
-    const capped = (form === 'shadowing' || form === 'dictation') && machinePassed === false;
+    const capped = form !== 'recall' && form !== 'vocab' && machinePassed === false;
 
     if (verdict === 'forgot') {
         const days = intervalForStage(1);
@@ -349,6 +421,15 @@ export class SrsServiceImpl implements SrsService {
 
     @inject(TYPES.SubtitleService)
     private subtitleService!: SubtitleService;
+
+    @inject(TYPES.FfmpegService)
+    private ffmpegService!: FfmpegService;
+
+    @inject(TYPES.StorageDirectoryProvider)
+    private storageDirectoryProvider!: StorageDirectoryProvider;
+
+    @inject(TYPES.FileSystemGateway)
+    private fileSystemGateway!: FileSystemGateway;
 
     public async addCard(request: SrsAddCardRequest): Promise<SrsAddCardResponse> {
         const referenceText = request.referenceText.trim();
@@ -550,6 +631,7 @@ export class SrsServiceImpl implements SrsService {
             evidence.score,
             passed,
             passed ? 'known' : 'forgot',
+            evidence.errorTags,
             now,
         );
         this.logger.info('srs reviewed', {
@@ -568,8 +650,15 @@ export class SrsServiceImpl implements SrsService {
     public async check(request: SrsCheckRequest): Promise<SrsCheckResult> {
         const card = await this.requireCard(request.cardId);
         const form = resolveSrsReviewForm(card);
-        if (form !== 'shadowing' && form !== 'dictation') {
-            return { cardId: card.id, form, score: null, passed: null, passLine: SRS_PASS_SCORE };
+        if (!SCORED_FORMS.includes(form)) {
+            return {
+                cardId: card.id,
+                form,
+                score: null,
+                passed: null,
+                passLine: SRS_PASS_SCORE,
+                errorTags: [],
+            };
         }
         const evidence = await this.collectEvidence(card, form, request.evidence);
         return {
@@ -578,6 +667,7 @@ export class SrsServiceImpl implements SrsService {
             score: evidence.score,
             passed: evidence.passed,
             passLine: SRS_PASS_SCORE,
+            errorTags: evidence.errorTags,
         };
     }
 
@@ -586,9 +676,9 @@ export class SrsServiceImpl implements SrsService {
         const form = resolveSrsReviewForm(card);
         this.assertVerdict(request.verdict);
 
-        const evidence = form === 'shadowing' || form === 'dictation'
+        const evidence = SCORED_FORMS.includes(form)
             ? await this.collectEvidence(card, form, request.evidence)
-            : { passed: null, score: null, attemptId: null };
+            : { passed: null, score: null, attemptId: null, errorTags: [] as SrsErrorTag[] };
 
         const now = Date.now();
         const decision = decideSchedule(card, form, request.verdict, evidence.passed, now);
@@ -607,6 +697,7 @@ export class SrsServiceImpl implements SrsService {
             evidence.score,
             evidence.passed,
             request.verdict,
+            evidence.errorTags,
             now,
         );
         this.logger.info('srs verdict', {
@@ -627,6 +718,7 @@ export class SrsServiceImpl implements SrsService {
             passed: evidence.passed,
             intervalDays: decision.intervalDays,
             mastered: decision.mastered,
+            errorTags: evidence.errorTags,
         };
     }
 
@@ -649,11 +741,7 @@ export class SrsServiceImpl implements SrsService {
 
     public async getCardLocation(cardId: number): Promise<SrsCardLocation> {
         const card = await this.requireCard(cardId);
-        const videoPath = card.videoPath;
-        const subtitlePath = card.subtitlePath;
-        if (card.sourceKind !== 'video' || !videoPath || !subtitlePath || card.sentenceIndex === null) {
-            throw new Error('这张卡片没有可定位的原片');
-        }
+        const { videoPath, start } = await this.locateSentence(card);
         const basePath = path.dirname(videoPath);
         const fileName = path.basename(videoPath);
         // 独立文件与目录入库的记录都按「目录 + 文件名」存，先按文件类型找，再回退目录类型
@@ -669,14 +757,55 @@ export class SrsServiceImpl implements SrsService {
         if (!history) {
             throw new Error('找不到这段视频的观看记录，请先在播放器里打开一次');
         }
+        return { historyId: history.id, startSeconds: start };
+    }
+
+    public async getCardThumbnail(cardId: number): Promise<SrsCardThumbnail> {
+        const card = await this.requireCard(cardId);
+        const { videoPath, start } = await this.locateSentence(card);
+        const tempRoot = await this.storageDirectoryProvider.provideDirectory(StorageDirectoryTarget.TEMP);
+        const folder = path.join(tempRoot, 'srs-thumbnails');
+        const fileName = `${createHash('sha1').update(`${videoPath}|${start}`).digest('hex')}.jpg`;
+        const filePath = path.join(folder, fileName);
+        if (!(await this.fileSystemGateway.fileExists(filePath))) {
+            await this.ffmpegService.thumbnail({
+                inputFile: videoPath,
+                outputFileName: fileName,
+                outputFolder: folder,
+                // 往后偏半秒，避开转场黑帧
+                time: start + 0.5,
+                options: { quality: 'low', width: 320 },
+            });
+        }
+        return { filePath };
+    }
+
+    /**
+     * 解析卡片对应的视频、字幕与句子起点。
+     *
+     * @param card 复习卡片。
+     * @returns 视频路径、字幕路径与句首秒数。
+     * @throws 卡片没有原声或字幕定位失败时抛出。
+     */
+    private async locateSentence(card: SrsCard): Promise<{
+        videoPath: string;
+        subtitlePath: string;
+        start: number;
+    }> {
+        const videoPath = card.videoPath;
+        const subtitlePath = card.subtitlePath;
+        if (card.sourceKind !== 'video' || !videoPath || !subtitlePath || card.sentenceIndex === null) {
+            throw new Error('这张卡片没有可定位的原片');
+        }
         const parsed = await this.subtitleService.parseSrt(subtitlePath);
         const sentence = parsed.sentences.find((item) => item.index === card.sentenceIndex);
         if (!sentence) {
             throw new Error('字幕里找不到这一句，无法定位原片');
         }
         return {
-            historyId: history.id,
-            startSeconds: sentence.adjustedStart ?? sentence.start,
+            videoPath,
+            subtitlePath,
+            start: sentence.adjustedStart ?? sentence.start,
         };
     }
 
@@ -704,6 +833,7 @@ export class SrsServiceImpl implements SrsService {
                 score: entry.score,
                 passed: entry.passed,
                 verdict: entry.verdict,
+                errorTags: entry.errorTags,
                 createdAt: entry.createdAt,
             });
         }
@@ -723,7 +853,7 @@ export class SrsServiceImpl implements SrsService {
         card: SrsCard,
         form: SrsReviewForm,
         evidence?: SrsReviewEvidence,
-    ): Promise<{ passed: boolean; score: number; attemptId: number | null }> {
+    ): Promise<{ passed: boolean; score: number; attemptId: number | null; errorTags: SrsErrorTag[] }> {
         if (form === 'shadowing') {
             if (!evidence || evidence.type !== 'shadowing') {
                 throw new Error('这张卡需要提交跟读记录');
@@ -738,6 +868,7 @@ export class SrsServiceImpl implements SrsService {
                 passed: attempt.score >= SRS_PASS_SCORE,
                 score: attempt.score,
                 attemptId: attempt.id,
+                errorTags: deriveErrorTags('shadowing', attempt.score, attempt.wordFeedback),
             };
         }
         if (form === 'dictation') {
@@ -753,11 +884,34 @@ export class SrsServiceImpl implements SrsService {
                 throw new Error('听写复习必须提交听写记录');
             }
             this.assertSameTarget(card, attempt);
+            const words = await this.practiceAttemptRepository.findWordFeedback(attempt.id);
             return {
                 passed: attempt.score >= SRS_PASS_SCORE,
                 score: attempt.score,
                 // 听写记录属于练习表，不写进 last_attempt_id，避免和跟读记录混用
                 attemptId: null,
+                errorTags: deriveErrorTags('dictation', attempt.score, words),
+            };
+        }
+        if (form === 'scenario') {
+            if (!evidence || evidence.type !== 'retell') {
+                throw new Error('这张卡需要提交复述记录');
+            }
+            this.assertPositiveInteger(evidence.attemptId, '练习记录 ID');
+            const attempt = await this.practiceAttemptRepository.findById(evidence.attemptId);
+            if (!attempt) {
+                throw new Error(`练习记录不存在: ${evidence.attemptId}`);
+            }
+            if (attempt.mode !== 'retell') {
+                throw new Error('情景复述必须提交复述记录');
+            }
+            this.assertSameTarget(card, attempt);
+            const words = await this.practiceAttemptRepository.findWordFeedback(attempt.id);
+            return {
+                passed: attempt.score >= SRS_PASS_SCORE,
+                score: attempt.score,
+                attemptId: null,
+                errorTags: deriveRetellTags(attempt.score, words),
             };
         }
         throw new Error('当前复习形态不需要提交记录');
@@ -796,6 +950,7 @@ export class SrsServiceImpl implements SrsService {
         score: number | null,
         passed: boolean | null,
         verdict: SrsVerdict,
+        errorTags: SrsErrorTag[],
         createdAt: number,
     ): Promise<void> {
         try {
@@ -805,7 +960,7 @@ export class SrsServiceImpl implements SrsService {
                 score,
                 passed,
                 verdict,
-                errorTags: '',
+                errorTags,
                 createdAt,
             });
         } catch (error) {

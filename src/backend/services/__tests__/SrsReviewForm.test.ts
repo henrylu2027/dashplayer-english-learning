@@ -70,6 +70,10 @@ describe('复习形态规则', () => {
         expect(resolveSrsReviewForm(videoCard({ stage: 5 }))).toBe('recall');
     });
 
+    it('场景对话来源的句子卡走情景复述', () => {
+        expect(resolveSrsReviewForm(videoCard({ sourceModules: ['dialogue'] }))).toBe('scenario');
+    });
+
     it('没有原声的句子卡始终跟读', () => {
         const card = videoCard({ stage: 2, sourceKind: 'free', videoPath: null, subtitlePath: null, videoKey: null, sentenceIndex: null });
         expect(resolveSrsReviewForm(card)).toBe('shadowing');
@@ -85,6 +89,7 @@ describe('复习取证与判定', () => {
         videoKey: string | null;
         sentenceIndex: number | null;
         referenceText: string;
+        wordFeedback: Array<{ expected?: string; actual?: string; status: 'correct' | 'mispronounced' | 'missing' | 'extra' }>;
     }
 
     /**
@@ -117,6 +122,7 @@ describe('复习取证与判定', () => {
         };
         const practiceAttemptRepository = {
             findById: async () => options.practiceAttempt ?? null,
+            findWordFeedback: async () => [],
         };
         const settingsStore = { get: () => '50', set: () => true };
 
@@ -139,6 +145,7 @@ describe('复习取证与判定', () => {
             videoKey: card.videoKey,
             sentenceIndex: card.sentenceIndex,
             referenceText: card.referenceText,
+            wordFeedback: [],
         };
     }
 
@@ -152,6 +159,26 @@ describe('复习取证与判定', () => {
         expect(result.passed).toBe(true);
         expect(updates).toHaveLength(0);
         expect(logs).toHaveLength(0);
+    });
+
+    it('跟读错词生成发音与漏词标签', async () => {
+        const card = videoCard({ stage: 1 });
+        const { service } = createService(card, {
+            shadowingAttempt: {
+                ...attemptFor(card, 55),
+                wordFeedback: [
+                    { expected: 'hello', status: 'mispronounced' },
+                    { expected: 'world', status: 'missing' },
+                ],
+            },
+        });
+
+        const result = await service.check({
+            cardId: card.id,
+            evidence: { type: 'shadowing', attemptId: 7 },
+        });
+
+        expect(result.errorTags).toEqual(['pronunciation', 'missing']);
     });
 
     it('跟读通过后点掌握推进一阶并写日志', async () => {
