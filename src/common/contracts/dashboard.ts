@@ -29,6 +29,8 @@ export interface DashboardSummary {
     dueReviewCount: number;
     /** 今日新学（今天入池）的卡片数。 */
     todayNewCardCount: number;
+    /** 每日新卡上限；0 表示暂停入池。 */
+    dailyNewCardLimit: number;
     /** 全部复习卡片数。 */
     totalCardCount: number;
     /** 今日跟读次数（含复习时的跟读）。 */

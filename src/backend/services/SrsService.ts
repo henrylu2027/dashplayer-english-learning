@@ -12,7 +12,13 @@ import type {
     SrsSourceModule,
     SrsSubmitReviewRequest,
 } from '@/common/contracts/srs';
-import { SRS_INTERVAL_DAYS, SRS_PASS_SCORE } from '@/common/contracts/srs';
+import {
+    SRS_DEFAULT_DAILY_NEW_CARD_LIMIT,
+    SRS_INTERVAL_DAYS,
+    SRS_MAX_DAILY_NEW_CARD_LIMIT,
+    SRS_PASS_SCORE,
+} from '@/common/contracts/srs';
+import type { SettingsStore } from '@/backend/services/gateways/SettingsStore';
 import type SentenceAudioService from '@/backend/services/SentenceAudioService';
 import type SrsCardRepository from '@/backend/services/repositories/SrsCardRepository';
 import type ShadowingAttemptRepository from '@/backend/services/repositories/ShadowingAttemptRepository';
@@ -68,6 +74,22 @@ export default interface SrsService {
     submitReview(request: SrsSubmitReviewRequest): Promise<SrsReviewOutcome>;
 
     /**
+     * 修改每日新卡上限；0 表示暂停入池。
+     *
+     * @param limit 目标上限，范围 0~200。
+     * @returns 实际保存的上限。
+     * @throws 非整数或超出范围时抛出。
+     */
+    setDailyNewCardLimit(limit: number): Promise<number>;
+
+    /**
+     * 读取当前每日新卡上限，供学习台等只读场景展示。
+     *
+     * @returns 当前上限；0 表示暂停入池。
+     */
+    getDailyNewCardLimit(): Promise<number>;
+
+    /**
      * 从复习队列删除一张卡片；不影响已有的跟读记录。
      *
      * @param cardId 卡片 ID。
@@ -92,9 +114,6 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 
 /** 复习文本的最大词数，与跟读评测保持一致。 */
 const MAX_REVIEW_WORDS = 200;
-
-/** 每日新卡上限；超出的进待办队列，按优先级顺延。 */
-const NEW_CARD_DAILY_LIMIT = 50;
 
 /** 入池优先级：数值越小越优先（薄弱 0、收藏 1、学习生词 2、对话 3）。 */
 const MODULE_PRIORITY: Record<SrsSourceModule, number> = {
@@ -141,6 +160,9 @@ export class SrsServiceImpl implements SrsService {
 
     @inject(TYPES.SentenceAudioService)
     private sentenceAudioService!: SentenceAudioService;
+
+    @inject(TYPES.SettingsStore)
+    private settingsStore!: SettingsStore;
 
     public async addCard(request: SrsAddCardRequest): Promise<SrsAddCardResponse> {
         const referenceText = request.referenceText.trim();
@@ -206,10 +228,11 @@ export class SrsServiceImpl implements SrsService {
         }
 
         const todayStart = startOfToday(now);
+        const dailyLimit = this.readDailyNewCardLimit();
         const createdToday = await this.srsCardRepository.countCreatedBetween(todayStart, startOfTomorrow(now));
-        if (createdToday >= NEW_CARD_DAILY_LIMIT) {
+        if (createdToday >= dailyLimit) {
             await this.srsCardRepository.enqueueIntake({ ...base, createdAt: now });
-            this.logger.info('srs ingest queued', { module: request.module, cardKey });
+            this.logger.info('srs ingest queued', { module: request.module, cardKey, dailyLimit });
             return { card: null, created: false, queued: true };
         }
 
@@ -234,13 +257,17 @@ export class SrsServiceImpl implements SrsService {
     private async promoteIntake(now: number): Promise<void> {
         const todayStart = startOfToday(now);
         const tomorrowStart = startOfTomorrow(now);
-        let createdToday = await this.srsCardRepository.countCreatedBetween(todayStart, tomorrowStart);
-        if (createdToday >= NEW_CARD_DAILY_LIMIT) {
+        const dailyLimit = this.readDailyNewCardLimit();
+        if (dailyLimit <= 0) {
             return;
         }
-        const pending = await this.srsCardRepository.listIntake(NEW_CARD_DAILY_LIMIT - createdToday);
+        let createdToday = await this.srsCardRepository.countCreatedBetween(todayStart, tomorrowStart);
+        if (createdToday >= dailyLimit) {
+            return;
+        }
+        const pending = await this.srsCardRepository.listIntake(dailyLimit - createdToday);
         for (const item of pending) {
-            if (createdToday >= NEW_CARD_DAILY_LIMIT) {
+            if (createdToday >= dailyLimit) {
                 break;
             }
             await this.srsCardRepository.createIfAbsent({
@@ -260,7 +287,40 @@ export class SrsServiceImpl implements SrsService {
     public async overview(): Promise<SrsOverview> {
         const now = Date.now();
         await this.promoteIntake(now);
-        return this.srsCardRepository.overview(now, OVERVIEW_LIST_LIMIT, OVERVIEW_LIST_LIMIT, startOfToday(now));
+        const data = await this.srsCardRepository.overview(
+            now,
+            OVERVIEW_LIST_LIMIT,
+            OVERVIEW_LIST_LIMIT,
+            startOfToday(now),
+        );
+        return { ...data, dailyNewCardLimit: this.readDailyNewCardLimit() };
+    }
+
+    public async setDailyNewCardLimit(limit: number): Promise<number> {
+        if (!Number.isInteger(limit) || limit < 0 || limit > SRS_MAX_DAILY_NEW_CARD_LIMIT) {
+            throw new Error(`每日新卡上限需为 0~${SRS_MAX_DAILY_NEW_CARD_LIMIT} 的整数`);
+        }
+        if (!this.settingsStore.set('learning.dailyNewCardLimit', String(limit))) {
+            throw new Error('保存每日新卡上限失败');
+        }
+        this.logger.info('srs daily limit updated', { limit });
+        return limit;
+    }
+
+    public async getDailyNewCardLimit(): Promise<number> {
+        return this.readDailyNewCardLimit();
+    }
+
+    /**
+     * 读取每日新卡上限；未设置或值非法时回退默认值并夹到合法区间。
+     */
+    private readDailyNewCardLimit(): number {
+        const raw = this.settingsStore.get('learning.dailyNewCardLimit');
+        const parsed = Number.parseInt(raw, 10);
+        if (!Number.isFinite(parsed)) {
+            return SRS_DEFAULT_DAILY_NEW_CARD_LIMIT;
+        }
+        return Math.min(SRS_MAX_DAILY_NEW_CARD_LIMIT, Math.max(0, parsed));
     }
 
     public async submitReview(request: SrsSubmitReviewRequest): Promise<SrsReviewOutcome> {

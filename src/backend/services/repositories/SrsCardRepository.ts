@@ -90,9 +90,9 @@ export default interface SrsCardRepository {
      * @param dueLimit 待复习列表最多返回条数。
      * @param upcomingLimit 未来列表最多返回条数。
      * @param newFrom 今日新学的统计起点（本地零点），epoch 毫秒。
-     * @returns 到期/未来/今日新学卡片与总数。
+     * @returns 到期/未来/今日新学卡片与总数；每日上限由服务层补充。
      */
-    overview(now: number, dueLimit: number, upcomingLimit: number, newFrom: number): Promise<SrsOverview>;
+    overview(now: number, dueLimit: number, upcomingLimit: number, newFrom: number): Promise<Omit<SrsOverview, 'dailyNewCardLimit'>>;
 
     /**
      * 写入一次复习结果并累计次数。

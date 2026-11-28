@@ -348,7 +348,12 @@
         "moduleOriginal": "原音跟读",
         "modulePractice": "听写复述",
         "moduleDialogue": "场景对话",
-        "moduleVocabulary": "词汇工坊"
+        "moduleVocabulary": "词汇工坊",
+        "limitStat": "每日新卡上限",
+        "limitPausedHint": "填 0 表示暂停新卡入池，新学的句子只排队",
+        "limitSaved": "每日新卡上限已改为 {{limit}}",
+        "limitInvalid": "上限需为 0~{{max}} 的整数",
+        "limitSaveFailed": "保存每日新卡上限失败"
     },
     "dashboard": {
         "title": "学习台",
@@ -400,7 +405,7 @@
         "moduleVocabulary": "{{count}} 个生词",
         "moduleVocabularyEmpty": "还没有生词",
         "moduleReview": "{{count}} 张待复习",
-        "moduleNewToday": "今日新学 {{count}} 条",
+        "moduleNewToday": "今日新学 {{count}} / {{limit}} 条",
         "moduleFavorite": "{{count}} 条收藏",
         "moduleDubbing": "{{count}} 个配音",
         "moduleRepair": "{{count}} 组修复任务",

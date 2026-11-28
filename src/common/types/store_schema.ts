@@ -53,6 +53,7 @@ export const SettingKeyObj = {
     'appearance.fontSize': 'fontSizeSmall',
     'i18n.language': 'system',
     'player.autoPlayNext': 'false',
+    'learning.dailyNewCardLimit': '50',
     'storage.path': '',
     'storage.collection': 'default',
     'proxy.mode': 'system',

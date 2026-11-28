@@ -138,7 +138,12 @@ export default class SrsCardRepositoryImpl implements SrsCardRepository {
         return row ? mapRow(row) : null;
     }
 
-    public async overview(now: number, dueLimit: number, upcomingLimit: number, newFrom: number): Promise<SrsOverview> {
+    public async overview(
+        now: number,
+        dueLimit: number,
+        upcomingLimit: number,
+        newFrom: number,
+    ): Promise<Omit<SrsOverview, 'dailyNewCardLimit'>> {
         const dueCondition = lte(srsCard.due_at, now);
         const dueRows = db
             .select()
@@ -171,6 +176,12 @@ export default class SrsCardRepositoryImpl implements SrsCardRepository {
             .orderBy(asc(srsCard.priority), asc(srsCard.id))
             .limit(50)
             .all();
+        // 预览列表最多 50 条，但计数必须是全量，否则把上限调到 50 以上就失去意义
+        const newCountRow = db
+            .select({ count: sql<number>`count(*)` })
+            .from(srsCard)
+            .where(and(gte(srsCard.created_at, newFrom), lte(srsCard.created_at, now)))
+            .get();
 
         return {
             dueCards: dueRows.map(mapRow),
@@ -178,7 +189,7 @@ export default class SrsCardRepositoryImpl implements SrsCardRepository {
             dueCount: Number(dueCountRow?.count ?? 0),
             totalCount: Number(totalCountRow?.count ?? 0),
             newCards: newRows.map(mapRow),
-            newCount: newRows.length,
+            newCount: Number(newCountRow?.count ?? 0),
             generatedAt: now,
         };
     }

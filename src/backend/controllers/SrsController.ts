@@ -19,5 +19,6 @@ export default class SrsController implements Controller {
         registerRoute('srs/submit-review', (p) => this.srsService.submitReview(p));
         registerRoute('srs/remove-card', (p) => this.srsService.removeCard(p.cardId));
         registerRoute('srs/sentence-audio', (p) => this.srsService.getSentenceAudio(p.cardId));
+        registerRoute('srs/set-daily-limit', (p) => this.srsService.setDailyNewCardLimit(p.limit));
     }
 }

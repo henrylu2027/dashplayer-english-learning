@@ -579,6 +579,7 @@ interface SrsDef {
     'srs/submit-review': { params: SrsSubmitReviewRequest, return: SrsReviewOutcome };
     'srs/remove-card': { params: { cardId: number }, return: void };
     'srs/sentence-audio': { params: { cardId: number }, return: string };
+    'srs/set-daily-limit': { params: { limit: number }, return: number };
 }
 
 interface DubbingDef {

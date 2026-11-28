@@ -2,6 +2,7 @@ import { inject, injectable } from 'inversify';
 import TYPES from '@/backend/ioc/types';
 import type { DashboardDailyActivity, DashboardSummary } from '@/common/contracts/dashboard';
 import type SrsCardRepository from '@/backend/services/repositories/SrsCardRepository';
+import type SrsService from '@/backend/services/SrsService';
 import type ShadowingAttemptRepository from '@/backend/services/repositories/ShadowingAttemptRepository';
 import type PracticeAttemptRepository from '@/backend/services/repositories/PracticeAttemptRepository';
 import type DialogueRepository from '@/backend/services/repositories/DialogueRepository';
@@ -48,6 +49,9 @@ function localDateKey(date: Date): string {
 export class DashboardServiceImpl implements DashboardService {
     @inject(TYPES.SrsCardRepository)
     private srsCardRepository!: SrsCardRepository;
+
+    @inject(TYPES.SrsService)
+    private srsService!: SrsService;
 
     @inject(TYPES.ShadowingAttemptRepository)
     private shadowingAttemptRepository!: ShadowingAttemptRepository;
@@ -120,9 +124,12 @@ export class DashboardServiceImpl implements DashboardService {
             dailyActivity.push({ date: key, count: countByDay.get(key) ?? 0 });
         }
 
+        const dailyNewCardLimit = await this.srsService.getDailyNewCardLimit();
+
         return {
             dueReviewCount: overview.dueCount,
             todayNewCardCount: overview.newCount,
+            dailyNewCardLimit,
             totalCardCount: overview.totalCount,
             todayAttemptCount: shadowToday.count,
             todayAverageScore: shadowToday.averageScore === null ? null : Math.round(shadowToday.averageScore),

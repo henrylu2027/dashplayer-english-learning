@@ -30,4 +30,8 @@ export const srsApi = {
     /** 提取并返回卡片句子的原声音频路径。 */
     sentenceAudio: (cardId: number): Promise<string> =>
         backendClient.call('srs/sentence-audio', { cardId }),
+
+    /** 修改每日新卡上限；0 表示暂停入池。 */
+    setDailyLimit: (limit: number): Promise<number> =>
+        backendClient.call('srs/set-daily-limit', { limit }),
 };

@@ -348,7 +348,12 @@
         "moduleOriginal": "Shadowing",
         "modulePractice": "Dictation",
         "moduleDialogue": "Dialogue",
-        "moduleVocabulary": "Vocabulary"
+        "moduleVocabulary": "Vocabulary",
+        "limitStat": "New cards / day",
+        "limitPausedHint": "Set to 0 to pause new cards; new sentences wait in the queue",
+        "limitSaved": "Daily new-card limit set to {{limit}}",
+        "limitInvalid": "Limit must be an integer between 0 and {{max}}",
+        "limitSaveFailed": "Failed to save the daily limit"
     },
     "dashboard": {
         "title": "Dashboard",
@@ -400,7 +405,7 @@
         "moduleVocabulary": "{{count}} words",
         "moduleVocabularyEmpty": "No words yet",
         "moduleReview": "{{count}} due",
-        "moduleNewToday": "{{count}} new today",
+        "moduleNewToday": "{{count}} / {{limit}} new today",
         "moduleFavorite": "{{count}} clips",
         "moduleDubbing": "{{count}} dubbing projects",
         "moduleRepair": "{{count}} repair groups",

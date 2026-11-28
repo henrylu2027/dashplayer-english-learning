@@ -23,6 +23,16 @@ export const SRS_PASS_SCORE = 80;
 export const SRS_INTERVAL_DAYS: readonly number[] = [1, 3, 7, 14, 30];
 
 /**
+ * 每日新卡入池上限的默认值。
+ *
+ * 0 表示暂停入池：新学的句子只进待办队列，不会生成新卡。
+ */
+export const SRS_DEFAULT_DAILY_NEW_CARD_LIMIT = 50;
+
+/** 每日新卡入池上限允许的最大值。 */
+export const SRS_MAX_DAILY_NEW_CARD_LIMIT = 200;
+
+/**
  * 学习来源模块。
  *
  * 五条学习路径 + 复习页自身；入池时记录来源，复习页据此显示标签。
@@ -83,8 +93,10 @@ export interface SrsOverview {
     totalCount: number;
     /** 今日新学（今天入池、明天第一次到期）的卡片，只做预览。 */
     newCards: SrsCard[];
-    /** 今日新学数量。 */
+    /** 今日新学数量（全量计数，不受列表条数限制）。 */
     newCount: number;
+    /** 当前设置的每日新卡上限；0 表示暂停入池。 */
+    dailyNewCardLimit: number;
     /** 生成这份概览的时间，epoch 毫秒；前端据此计算“还有几天”文案，避免渲染期取当前时间。 */
     generatedAt: number;
 }

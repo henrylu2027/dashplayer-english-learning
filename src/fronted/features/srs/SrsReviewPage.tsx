@@ -6,7 +6,7 @@ import { useNavigate } from 'react-router-dom';
 import { BookmarkPlus, BookOpen, Loader2, Repeat, Trash2, Volume2 } from 'lucide-react';
 
 import type { SrsCard, SrsOverview, SrsReviewOutcome, SrsSourceModule } from '@/common/contracts/srs';
-import { SRS_PASS_SCORE } from '@/common/contracts/srs';
+import { SRS_MAX_DAILY_NEW_CARD_LIMIT, SRS_PASS_SCORE } from '@/common/contracts/srs';
 import UrlUtil from '@/common/utils/UrlUtil';
 import PageHeader from '@/fronted/components/shared/common/PageHeader';
 import {
@@ -215,6 +215,9 @@ export default function SrsReviewPage() {
     const [selectedCard, setSelectedCard] = useState<SrsCard | null>(null);
     const [pendingDelete, setPendingDelete] = useState<SrsCard | null>(null);
     const [adding, setAdding] = useState(false);
+    /** 每日新卡上限的输入草稿；null 表示显示概览里的当前值。 */
+    const [limitDraft, setLimitDraft] = useState<string | null>(null);
+    const [savingLimit, setSavingLimit] = useState(false);
     /** 首次加载成功时自动选中第一张待复习卡，之后不再干预用户选择。 */
     const didAutoSelectRef = useRef(false);
     /** 今日新学预览的播放器；离开页面时停掉。 */
@@ -247,6 +250,37 @@ export default function SrsReviewPage() {
             cancelled = true;
         };
     }, [loadOverview]);
+
+    const dailyLimit = overview?.dailyNewCardLimit;
+    // 输入框优先显示草稿；没有草稿时跟随概览，不额外用 effect 同步
+    const limitValue = limitDraft ?? (dailyLimit === undefined ? '' : String(dailyLimit));
+
+    /** 保存每日新卡上限；0 表示暂停入池。 */
+    const saveDailyLimit = useCallback(async (): Promise<void> => {
+        const parsed = Number.parseInt(limitValue, 10);
+        if (!Number.isFinite(parsed) || parsed < 0 || parsed > SRS_MAX_DAILY_NEW_CARD_LIMIT) {
+            toast.error(t('srs.limitInvalid', { max: SRS_MAX_DAILY_NEW_CARD_LIMIT }));
+            setLimitDraft(null);
+            return;
+        }
+        if (parsed === dailyLimit) {
+            setLimitDraft(null);
+            return;
+        }
+        setSavingLimit(true);
+        try {
+            const saved = await srsApi.setDailyLimit(parsed);
+            toast.success(t('srs.limitSaved', { limit: saved }));
+            await loadOverview();
+            setLimitDraft(null);
+        } catch (error) {
+            logger.error('保存每日新卡上限失败', { error });
+            toast.error(error instanceof Error ? error.message : t('srs.limitSaveFailed'));
+            setLimitDraft(null);
+        } finally {
+            setSavingLimit(false);
+        }
+    }, [limitValue, dailyLimit, loadOverview, t]);
 
     const handleReviewed = useCallback((outcome: SrsReviewOutcome): void => {
         setSelectedCard(outcome.card);
@@ -369,7 +403,7 @@ export default function SrsReviewPage() {
 
             <div className="flex-1 min-h-0 overflow-y-auto px-6 pb-6 pt-2">
                 <div className="mx-auto flex w-full max-w-6xl flex-col gap-4">
-                    <div className="grid grid-cols-3 gap-3">
+                    <div className="grid grid-cols-4 gap-3">
                         <div className="rounded-2xl border border-border/60 bg-card px-4 py-3 shadow-xs">
                             <div className="text-2xl font-semibold tabular-nums text-foreground">{dueCount}</div>
                             <div className="mt-0.5 text-xs text-muted-foreground">{t('srs.dueStat')}</div>
@@ -381,6 +415,33 @@ export default function SrsReviewPage() {
                         <div className="rounded-2xl border border-border/60 bg-card px-4 py-3 shadow-xs">
                             <div className="text-2xl font-semibold tabular-nums text-foreground">{SRS_PASS_SCORE}</div>
                             <div className="mt-0.5 text-xs text-muted-foreground">{t('srs.passStat')}</div>
+                        </div>
+                        <div
+                            className="rounded-2xl border border-border/60 bg-card px-4 py-3 shadow-xs"
+                            title={t('srs.limitPausedHint')}
+                        >
+                            <div className="flex items-baseline gap-1.5">
+                                <input
+                                    type="number"
+                                    min={0}
+                                    max={SRS_MAX_DAILY_NEW_CARD_LIMIT}
+                                    value={limitValue}
+                                    disabled={savingLimit || dailyLimit === undefined}
+                                    onChange={(event) => setLimitDraft(event.target.value)}
+                                    onBlur={() => void saveDailyLimit()}
+                                    onKeyDown={(event) => {
+                                        if (event.key === 'Enter') {
+                                            event.currentTarget.blur();
+                                        }
+                                    }}
+                                    aria-label={t('srs.limitStat')}
+                                    className="h-9 w-20 rounded-lg border border-border/60 bg-transparent px-2 text-2xl font-semibold tabular-nums text-foreground outline-none transition-colors focus:border-primary/50 disabled:opacity-60"
+                                />
+                                {savingLimit && (
+                                    <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
+                                )}
+                            </div>
+                            <div className="mt-0.5 text-xs text-muted-foreground">{t('srs.limitStat')}</div>
                         </div>
                     </div>
 
