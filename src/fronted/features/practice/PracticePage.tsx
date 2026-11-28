@@ -399,7 +399,7 @@ export default function PracticePage() {
     const coveredCount = retell?.keywords.filter((keyword) => keyword.covered).length ?? 0;
 
     return (
-        <div className="w-full h-full flex flex-col overflow-hidden select-none bg-background text-foreground">
+        <div className="w-full h-full flex flex-col overflow-hidden select-text bg-background text-foreground">
             <div className="px-6 pt-5 pb-2">
                 <PageHeader title={t('practice.title')} description={t('practice.description')} />
             </div>

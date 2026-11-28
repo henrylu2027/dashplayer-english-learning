@@ -494,7 +494,7 @@ export default function OriginalShadowingPage() {
     };
 
     return (
-        <div className="w-full h-full flex flex-col overflow-hidden select-none bg-background text-foreground">
+        <div className="w-full h-full flex flex-col overflow-hidden select-text bg-background text-foreground">
             <div className="flex flex-wrap items-center justify-between gap-3 px-6 pt-5 pb-2">
                 <PageHeader
                     title={t('originalShadowing.title')}

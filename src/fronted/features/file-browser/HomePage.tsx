@@ -115,7 +115,7 @@ const HomePage = () => {
     const hasHistory = vps && vps.length > 0;
 
     return (
-        <div className="flex h-screen w-full flex-col text-foreground bg-background select-none">
+        <div className="flex h-screen w-full flex-col text-foreground bg-background select-text">
             <header className="top-0 flex h-9 items-center shrink-0">
                 <TitleBar
                     maximizable={false}

@@ -51,7 +51,7 @@ const TranscriptPage = () => {
     };
 
     return (
-        <div className="w-full h-full flex flex-col overflow-hidden select-none bg-background text-foreground">
+        <div className="w-full h-full flex flex-col overflow-hidden select-text bg-background text-foreground">
             {/* 顶栏标题区：保持现代无分割线设计 */}
             <div className="px-6 pt-5 pb-2">
                 <PageHeader
