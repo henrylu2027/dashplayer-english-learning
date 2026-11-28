@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { TFunction } from 'i18next';
 import toast from 'react-hot-toast';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { BookmarkPlus, BookOpen, Loader2, Repeat, Trash2, Volume2 } from 'lucide-react';
 
 import type { SrsCard, SrsOverview, SrsReviewOutcome, SrsSourceModule } from '@/common/contracts/srs';
@@ -205,6 +205,7 @@ function NewCardRow({
 export default function SrsReviewPage() {
     const { t } = useTranslation('pages');
     const navigate = useNavigate();
+    const [searchParams] = useSearchParams();
     const currentSentence = usePlayer((s) => s.currentSentence);
     const videoPath = useFile((s) => s.videoPath);
     const subtitlePath = useFile((s) => s.subtitlePath);
@@ -222,6 +223,12 @@ export default function SrsReviewPage() {
     const didAutoSelectRef = useRef(false);
     /** 今日新学预览的播放器；离开页面时停掉。 */
     const previewAudioRef = useRef<HTMLAudioElement | null>(null);
+    /** 学习台带过来的聚焦目标：今日到期 / 今日新学 / 未来。 */
+    const focus = searchParams.get('focus');
+    const dueSectionRef = useRef<HTMLElement | null>(null);
+    const newSectionRef = useRef<HTMLElement | null>(null);
+    const upcomingSectionRef = useRef<HTMLElement | null>(null);
+    const [flashedSection, setFlashedSection] = useState<string | null>(null);
 
     const loadOverview = useCallback(async (): Promise<void> => {
         try {
@@ -281,6 +288,27 @@ export default function SrsReviewPage() {
             setSavingLimit(false);
         }
     }, [limitValue, dailyLimit, loadOverview, t]);
+
+    // 从学习台点「今日新学 / 未来」进来时，滚到对应区块并短暂高亮
+    useEffect(() => {
+        if (!overview || !focus) {
+            return undefined;
+        }
+        const target = focus === 'due'
+            ? dueSectionRef.current
+            : focus === 'new'
+                ? newSectionRef.current
+                : focus === 'upcoming'
+                    ? upcomingSectionRef.current
+                    : null;
+        if (!target) {
+            return undefined;
+        }
+        target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        setFlashedSection(focus);
+        const timer = window.setTimeout(() => setFlashedSection(null), 1600);
+        return () => window.clearTimeout(timer);
+    }, [overview, focus]);
 
     const handleReviewed = useCallback((outcome: SrsReviewOutcome): void => {
         setSelectedCard(outcome.card);
@@ -463,7 +491,13 @@ export default function SrsReviewPage() {
                     ) : (
                         <div className="grid gap-4 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
                             <div className="flex min-w-0 flex-col gap-3">
-                                <section className="rounded-2xl border border-border/60 bg-card p-4 shadow-xs">
+                                <section
+                                    ref={dueSectionRef}
+                                    className={cn(
+                                        'rounded-2xl border border-border/60 bg-card p-4 shadow-xs transition-shadow',
+                                        flashedSection === 'due' && 'ring-2 ring-primary/40',
+                                    )}
+                                >
                                     <div className="flex items-baseline justify-between">
                                         <h2 className="text-sm font-medium text-foreground">{t('srs.dueTitle')}</h2>
                                         <span className="text-xs tabular-nums text-muted-foreground">{dueCount}</span>
@@ -497,7 +531,13 @@ export default function SrsReviewPage() {
                                 </section>
 
                                 {overview && overview.upcomingCards.length > 0 && (
-                                    <section className="rounded-2xl border border-border/60 bg-card p-4 shadow-xs">
+                                    <section
+                                        ref={upcomingSectionRef}
+                                        className={cn(
+                                            'rounded-2xl border border-border/60 bg-card p-4 shadow-xs transition-shadow',
+                                            flashedSection === 'upcoming' && 'ring-2 ring-primary/40',
+                                        )}
+                                    >
                                         <div className="flex items-baseline justify-between">
                                             <h2 className="text-sm font-medium text-foreground">{t('srs.upcomingTitle')}</h2>
                                             <span className="text-xs tabular-nums text-muted-foreground">
@@ -520,7 +560,13 @@ export default function SrsReviewPage() {
                                 )}
 
                                 {overview && overview.newCards.length > 0 && (
-                                    <section className="rounded-2xl border border-border/60 bg-card p-4 shadow-xs">
+                                    <section
+                                        ref={newSectionRef}
+                                        className={cn(
+                                            'rounded-2xl border border-border/60 bg-card p-4 shadow-xs transition-shadow',
+                                            flashedSection === 'new' && 'ring-2 ring-primary/40',
+                                        )}
+                                    >
                                         <div className="flex items-baseline justify-between">
                                             <h2 className="text-sm font-medium text-foreground">{t('srs.newTitle')}</h2>
                                             <span className="text-xs tabular-nums text-muted-foreground">

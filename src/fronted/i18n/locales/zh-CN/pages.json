@@ -413,6 +413,8 @@
         "modulePracticeIdle": "今天还没听写复述",
         "moduleDialogueIdle": "今天还没对话",
         "moduleVocabulary": "{{count}} 个生词",
+        "moduleVocabularySplit": "未学 {{unlearned}} · 已学 {{learned}}",
+        "moduleUpcoming": "未来 {{count}} 张",
         "moduleVocabularyEmpty": "还没有生词",
         "moduleReview": "{{count}} 张待复习",
         "moduleNewToday": "今日新学 {{count}} / {{limit}} 条",

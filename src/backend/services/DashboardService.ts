@@ -128,6 +128,8 @@ export class DashboardServiceImpl implements DashboardService {
 
         return {
             dueReviewCount: overview.dueCount,
+            // 未来复习 = 全部卡片里没到期的那部分，不额外查一次
+            upcomingReviewCount: Math.max(0, overview.totalCount - overview.dueCount),
             todayNewCardCount: overview.newCount,
             dailyNewCardLimit,
             totalCardCount: overview.totalCount,

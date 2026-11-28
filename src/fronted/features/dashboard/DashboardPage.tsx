@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import {
     ArrowRight,
     AudioLines,
@@ -92,7 +92,8 @@ export default function DashboardPage() {
     const [latestVideo, setLatestVideo] = useState<WatchHistoryVO | null>(null);
     /** 各模块的数量摘要；取不到就留空，不阻塞学习台。 */
     const [moduleCounts, setModuleCounts] = useState<{
-        vocabulary: number | null;
+        /** 词表总数与其中已学会的数量。 */
+        vocabulary: { total: number; learned: number } | null;
         favorites: number | null;
         dubbing: number | null;
         repair: number | null;
@@ -117,9 +118,14 @@ export default function DashboardPage() {
         if (history.status === 'fulfilled' && Array.isArray(history.value)) {
             setLatestVideo(history.value.find((item) => !item.isFolder) ?? history.value[0] ?? null);
         }
+        const words = vocabulary.status === 'fulfilled'
+            && vocabulary.value.success
+            && Array.isArray(vocabulary.value.data)
+            ? vocabulary.value.data
+            : null;
         setModuleCounts({
-            vocabulary: vocabulary.status === 'fulfilled' && vocabulary.value.success && Array.isArray(vocabulary.value.data)
-                ? vocabulary.value.data.length
+            vocabulary: words
+                ? { total: words.length, learned: words.filter((word) => Boolean(word.learnedAt)).length }
                 : null,
             favorites: favorites.status === 'fulfilled' && Array.isArray(favorites.value)
                 ? favorites.value.length
@@ -225,16 +231,19 @@ export default function DashboardPage() {
                 name: tn('vocabularyStudio'),
                 hint: moduleCounts.vocabulary === null
                     ? ''
-                    : moduleCounts.vocabulary === 0
+                    : moduleCounts.vocabulary.total === 0
                         ? t('dashboard.moduleVocabularyEmpty')
-                        : t('dashboard.moduleVocabulary', { count: moduleCounts.vocabulary }),
+                        : t('dashboard.moduleVocabularySplit', {
+                            unlearned: moduleCounts.vocabulary.total - moduleCounts.vocabulary.learned,
+                            learned: moduleCounts.vocabulary.learned,
+                        }),
                 path: '/vocabulary',
                 icon: BookOpen,
             },
             {
                 key: 'review',
                 name: tn('reviewPlan'),
-                hint: `${t('dashboard.moduleReview', { count: summary.dueReviewCount })} · ${t('dashboard.moduleNewToday', { count: summary.todayNewCardCount, limit: summary.dailyNewCardLimit })}`,
+                hint: `${t('dashboard.moduleReview', { count: summary.dueReviewCount })} · ${t('dashboard.moduleNewToday', { count: summary.todayNewCardCount, limit: summary.dailyNewCardLimit })} · ${t('dashboard.moduleUpcoming', { count: summary.upcomingReviewCount })}`,
                 path: '/review',
                 icon: Repeat,
             },
@@ -326,6 +335,17 @@ export default function DashboardPage() {
                                             {summary.dueReviewCount}
                                         </span>
                                         <span className="text-xs text-muted-foreground">{t('dashboard.dueStat')}</span>
+                                    </div>
+                                    <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+                                        <Link to="/review?focus=new" className="transition-colors hover:text-primary">
+                                            {t('dashboard.moduleNewToday', {
+                                                count: summary.todayNewCardCount,
+                                                limit: summary.dailyNewCardLimit,
+                                            })}
+                                        </Link>
+                                        <Link to="/review?focus=upcoming" className="transition-colors hover:text-primary">
+                                            {t('dashboard.moduleUpcoming', { count: summary.upcomingReviewCount })}
+                                        </Link>
                                     </div>
                                     <div className="mt-3">
                                         {reviewDone ? (
