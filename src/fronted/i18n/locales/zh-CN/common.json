@@ -46,7 +46,7 @@
   "dialogue": "场景对话",
   "vocabulary": "词汇工坊"
  },
-    "foundWords": "搜索到 {{count}} 个",
+    "foundWords": "当前显示 {{count}} 个",
     "exportTemplate": "导出模板",
     "importExcel": "导入 Excel",
     "showAllVideos": "显示全部视频",

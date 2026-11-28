@@ -46,7 +46,7 @@
   "dialogue": "Dialogue",
   "vocabulary": "Vocabulary"
  },
-    "foundWords": "{{count}} found",
+    "foundWords": "{{count}} shown",
     "exportTemplate": "Export template",
     "importExcel": "Import Excel",
     "showAllVideos": "Show all videos",

@@ -5,7 +5,7 @@ import type { VideoLearningClipPage } from '@/common/types/vo/VideoLearningClipV
 import type { VideoClip } from './types';
 import ClipGrid from '@/fronted/features/video-learning/components/ClipGrid';
 import VideoPlayerPane from '@/fronted/features/video-learning/components/VideoPlayerPane';
-import WordSidebar, { type WordItem } from '@/fronted/features/video-learning/components/WordSidebar';
+import WordSidebar, { type LearnFilter, type WordItem } from '@/fronted/features/video-learning/components/WordSidebar';
 import WordEditDialog from '@/fronted/features/video-learning/components/WordEditDialog';
 import { videoLearningApi } from '@/fronted/features/video-learning/videoLearningApi';
 import { getRendererLogger } from '@/fronted/log/simple-logger';
@@ -21,6 +21,7 @@ import {
 import { Button } from '@/fronted/components/ui/button';
 import toast from 'react-hot-toast';
 import { cn } from '@/fronted/lib/utils';
+import { useSearchParams } from 'react-router-dom';
 
 const logger = getRendererLogger('VideoLearning');
 import PageHeader from '@/fronted/components/shared/common/PageHeader';
@@ -45,6 +46,14 @@ const DEFAULT_LEARNING_RESPONSE: { success: true; data: VideoLearningClipPage } 
 
 export default function VideoLearningPage() {
   const { t } = useI18nTranslation('pages');
+  const [searchParams] = useSearchParams();
+  // 学习台「未学 / 已学」链接直接落到对应筛选
+  const learnParam = searchParams.get('learn');
+  const initialLearnFilter: LearnFilter = learnParam === 'learned'
+    ? 'learned'
+    : learnParam === 'unlearned'
+      ? 'unlearned'
+      : 'all';
   const [selectedWord, setSelectedWord] = useState<WordItem | null>(null);
   // 正在编辑的单词；null 表示编辑弹窗关闭
   const [editingWord, setEditingWord] = useState<WordItem | null>(null);
@@ -532,6 +541,8 @@ export default function VideoLearningPage() {
         {/* 左栏卡片：生词库 */}
         <div className="flex flex-col rounded-2xl border border-border/70 bg-card p-4 shadow-2xs min-h-0">
           <WordSidebar
+            key={initialLearnFilter}
+            initialLearnFilter={initialLearnFilter}
             words={words}
             loading={loading}
             selectedWord={selectedWord}

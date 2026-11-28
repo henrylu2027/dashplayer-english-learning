@@ -188,7 +188,15 @@ export default function DashboardPage() {
         : 0;
 
     // 侧栏的每个模块在这里都有一条入口，学习类带今日进度，工具类带数量摘要
-    const moduleEntries: Array<{ key: string; name: string; hint: string; path: string; icon: LucideIcon }> = summary
+    const moduleEntries: Array<{
+        key: string;
+        name: string;
+        hint: string;
+        path: string;
+        icon: LucideIcon;
+        /** 可独立点击的子入口；有值时整格改为容器，避免按钮里嵌套链接。 */
+        links?: Array<{ label: string; path: string }>;
+    }> = summary
         ? [
             {
                 key: 'player',
@@ -233,10 +241,23 @@ export default function DashboardPage() {
                     ? ''
                     : moduleCounts.vocabulary.total === 0
                         ? t('dashboard.moduleVocabularyEmpty')
-                        : t('dashboard.moduleVocabularySplit', {
-                            unlearned: moduleCounts.vocabulary.total - moduleCounts.vocabulary.learned,
-                            learned: moduleCounts.vocabulary.learned,
-                        }),
+                        : '',
+                links: moduleCounts.vocabulary && moduleCounts.vocabulary.total > 0
+                    ? [
+                        {
+                            label: t('dashboard.moduleVocabularyUnlearned', {
+                                count: moduleCounts.vocabulary.total - moduleCounts.vocabulary.learned,
+                            }),
+                            path: '/vocabulary?learn=unlearned',
+                        },
+                        {
+                            label: t('dashboard.moduleVocabularyLearned', {
+                                count: moduleCounts.vocabulary.learned,
+                            }),
+                            path: '/vocabulary?learn=learned',
+                        },
+                    ]
+                    : undefined,
                 path: '/vocabulary',
                 icon: BookOpen,
             },
@@ -654,23 +675,66 @@ export default function DashboardPage() {
                                 <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
                                     {moduleEntries.map((entry) => {
                                         const Icon = entry.icon;
+                                        const iconTile = (
+                                            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground transition-colors group-hover:text-foreground">
+                                                <Icon className="h-4 w-4" />
+                                            </span>
+                                        );
+                                        const arrow = (
+                                            <ArrowRight className="h-4 w-4 shrink-0 text-muted-foreground/40 transition-colors group-hover:text-foreground" />
+                                        );
+                                        const cellClass = 'group flex items-center gap-3 rounded-xl border border-border/60 bg-background px-3 py-2.5 text-left transition-colors hover:border-border hover:bg-muted/40';
+                                        if (entry.links && entry.links.length > 0) {
+                                            // 有子入口的格子不能用 button 包链接，改成可点容器
+                                            return (
+                                                <div
+                                                    key={entry.key}
+                                                    role="button"
+                                                    tabIndex={0}
+                                                    onClick={() => navigate(entry.path)}
+                                                    onKeyDown={(event) => {
+                                                        if (event.key === 'Enter') {
+                                                            navigate(entry.path);
+                                                        }
+                                                    }}
+                                                    className={`${cellClass} cursor-pointer`}
+                                                >
+                                                    {iconTile}
+                                                    <span className="min-w-0 flex-1">
+                                                        <span className="block truncate text-sm text-foreground">{entry.name}</span>
+                                                        <span className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs">
+                                                            {entry.links.map((link) => (
+                                                                <Link
+                                                                    key={link.path}
+                                                                    to={link.path}
+                                                                    onClick={(event) => event.stopPropagation()}
+                                                                    onKeyDown={(event) => event.stopPropagation()}
+                                                                    className="text-muted-foreground transition-colors hover:text-primary"
+                                                                >
+                                                                    {link.label}
+                                                                </Link>
+                                                            ))}
+                                                        </span>
+                                                    </span>
+                                                    {arrow}
+                                                </div>
+                                            );
+                                        }
                                         return (
                                             <button
                                                 key={entry.key}
                                                 type="button"
                                                 onClick={() => navigate(entry.path)}
-                                                className="group flex items-center gap-3 rounded-xl border border-border/60 bg-background px-3 py-2.5 text-left transition-colors hover:border-border hover:bg-muted/40"
+                                                className={cellClass}
                                             >
-                                                <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground transition-colors group-hover:text-foreground">
-                                                    <Icon className="h-4 w-4" />
-                                                </span>
+                                                {iconTile}
                                                 <span className="min-w-0 flex-1">
                                                     <span className="block truncate text-sm text-foreground">{entry.name}</span>
                                                     {entry.hint !== '' && (
                                                         <span className="block truncate text-xs text-muted-foreground">{entry.hint}</span>
                                                     )}
                                                 </span>
-                                                <ArrowRight className="h-4 w-4 shrink-0 text-muted-foreground/40 transition-colors group-hover:text-foreground" />
+                                                {arrow}
                                             </button>
                                         );
                                     })}

@@ -43,7 +43,7 @@ export interface WordItem {
 type SortMode = 'usage' | 'alphabetical' | 'recentVideo';
 
 /** 单词列表筛选方式：全部 / 未学 / 已学。 */
-type LearnFilter = 'all' | 'unlearned' | 'learned';
+export type LearnFilter = 'all' | 'unlearned' | 'learned';
 
 /** 出处模块的展示文案翻译键。 */
 const ORIGIN_MODULE_LABEL: Record<string, string> = {
@@ -68,6 +68,8 @@ type Props = {
   onEditWord: (word: WordItem) => void;
   /** 某个单词删除成功后的回调。 */
   onWordDeleted: (word: WordItem) => void;
+  /** 初始筛选；从学习台带参数进来时直接落到对应视图。 */
+  initialLearnFilter?: LearnFilter;
 };
 
 export default function WordSidebar({
@@ -82,12 +84,13 @@ export default function WordSidebar({
   onImportWords,
   onEditWord,
   onWordDeleted,
+  initialLearnFilter = 'all',
 }: Props) {
   const virtuosoRef = useRef<VirtuosoHandle>(null);
   const { t } = useTranslation('common');
   const [sortMode, setSortMode] = useState<SortMode>('usage');
   /** 未学/已学筛选。 */
-  const [learnFilter, setLearnFilter] = useState<LearnFilter>('all');
+  const [learnFilter, setLearnFilter] = useState<LearnFilter>(initialLearnFilter);
   /** 本次会话里刚点了「学会了」的词，先本地生效，等下次拉取再以数据库为准。 */
   const [learnedAtById, setLearnedAtById] = useState<Record<number, number>>({});
   // 正在执行删除请求的单词 id，用于按钮转圈与防重复提交
@@ -260,7 +263,9 @@ export default function WordSidebar({
           <div className="flex items-center justify-between gap-1 text-xs text-muted-foreground pt-0.5">
             <div className="text-xs font-medium text-muted-foreground tabular-nums">
               {t('wordCount', { count: words.length })}
-              {searchTerm && <span className="ml-1.5 text-primary">({t('foundWords', { count: displayedWords.length })})</span>}
+              {(searchTerm || learnFilter !== 'all') && (
+                <span className="ml-1.5 text-primary">({t('foundWords', { count: displayedWords.length })})</span>
+              )}
             </div>
             <div className="flex items-center gap-1">
               <Select value={learnFilter} onValueChange={(value) => setLearnFilter(value as LearnFilter)}>
