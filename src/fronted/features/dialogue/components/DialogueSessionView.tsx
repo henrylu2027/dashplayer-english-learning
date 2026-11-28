@@ -666,8 +666,10 @@ export default function DialogueSessionView({
                     type="button"
                     aria-label={t('dialogue.resizeBar')}
                     onMouseDown={startResize}
-                    className="w-1.5 shrink-0 cursor-col-resize rounded-full bg-border/50 transition-colors hover:bg-primary/40"
-                />
+                    className="group relative w-2 shrink-0 cursor-col-resize touch-none select-none"
+                >
+                    <span className="absolute left-1/2 top-1/2 h-12 w-1 -translate-x-1/2 -translate-y-1/2 rounded-full bg-border/60 transition-colors duration-150 group-hover:bg-rose-600/80" />
+                </button>
 
                 {/* 右：参考句式与练习点在上，评测在下 */}
                 <div style={{ width: rightWidth }} className="flex min-h-0 shrink-0 flex-col gap-4 overflow-y-auto">

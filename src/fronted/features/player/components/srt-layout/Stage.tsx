@@ -56,6 +56,21 @@ export default function PlaybackStage({ className, onReady, onEnded, onProvideVi
         onEnded?.();
     }, [onEnded]);
 
+    // 视频画面单击：左键点在画面上暂停，再点一次继续播放
+    useEffect(() => {
+        if (!videoElement) {
+            return undefined;
+        }
+        const handleClick = (event: MouseEvent) => {
+            if (event.button !== 0) {
+                return;
+            }
+            playerActions.togglePlay();
+        };
+        videoElement.addEventListener('click', handleClick);
+        return () => videoElement.removeEventListener('click', handleClick);
+    }, [videoElement]);
+
     if (!hasSource) {
         return <div />;
     }
