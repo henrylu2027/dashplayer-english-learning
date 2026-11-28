@@ -39,6 +39,7 @@ function videoCard(overrides: Partial<SrsCard> = {}): SrsCard {
         reviewCount: 0,
         passCount: 0,
         masteredAt: null,
+        lastErrorTags: [],
         createdAt: 0,
         updatedAt: 0,
         ...overrides,

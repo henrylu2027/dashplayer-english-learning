@@ -431,7 +431,13 @@
         "tagMissing": "漏词",
         "tagExtra": "多余词",
         "tagMeaning": "词义不熟",
-        "tagStructure": "结构不完整"
+        "tagStructure": "结构不完整",
+        "tagFilterAll": "全部标签",
+        "exportHistory": "导出记录",
+        "exportDone": "复习记录已导出",
+        "exportFailed": "导出复习记录失败",
+        "archiveCalendar": "日历",
+        "calendarEmpty": "还没有复习记录"
     },
     "dashboard": {
         "title": "学习台",

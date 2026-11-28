@@ -108,6 +108,8 @@ export interface SrsCard {
     passCount: number;
     /** 掌握时间，epoch 毫秒；null 表示尚未掌握。 */
     masteredAt: number | null;
+    /** 最近一次复习的错误标签。 */
+    lastErrorTags: SrsErrorTag[];
     /** 创建时间，epoch 毫秒。 */
     createdAt: number;
     /** 最后更新时间，epoch 毫秒。 */
@@ -338,6 +340,8 @@ export interface SrsQueueRequest {
     scope: SrsQueueScope;
     /** 筛选条件；默认全部。 */
     filter?: SrsQueueFilter;
+    /** 专项筛选：只看最近一次复习带该错误标签的卡片。 */
+    tag?: SrsErrorTag;
     /** 偏移量，从 0 开始。 */
     offset?: number;
     /** 本次最多返回条数。 */
@@ -420,4 +424,34 @@ export interface SrsHistoryRequest {
 export interface SrsHistoryResponse {
     /** 按时间倒序的记录。 */
     items: SrsHistoryItem[];
+}
+
+/**
+ * 复习日历中的一天。
+ */
+export interface SrsHistoryDay {
+    /** 本地日期，YYYY-MM-DD。 */
+    date: string;
+    /** 当天判定次数。 */
+    count: number;
+    /** 当天机器通过的次数。 */
+    passed: number;
+}
+
+/**
+ * 复习日历结果。
+ */
+export interface SrsHistoryCalendarResponse {
+    /** 按日期正序的最近记录。 */
+    days: SrsHistoryDay[];
+}
+
+/**
+ * 复习记录导出结果。
+ */
+export interface SrsHistoryExportResponse {
+    /** 建议的文件名。 */
+    fileName: string;
+    /** CSV 文本，UTF-8。 */
+    csv: string;
 }

@@ -5,6 +5,8 @@ import type {
     SrsCardThumbnail,
     SrsCheckRequest,
     SrsCheckResult,
+    SrsHistoryCalendarResponse,
+    SrsHistoryExportResponse,
     SrsHistoryRequest,
     SrsHistoryResponse,
     SrsOverview,
@@ -69,6 +71,14 @@ export const srsApi = {
     /** 读取最近的复习日志。 */
     history: (params: SrsHistoryRequest = {}): Promise<SrsHistoryResponse> =>
         backendClient.call('srs/history', params),
+
+    /** 读取最近一年的复习日历。 */
+    historyCalendar: (): Promise<SrsHistoryCalendarResponse> =>
+        backendClient.call('srs/history-calendar'),
+
+    /** 导出复习记录 CSV。 */
+    exportHistory: (): Promise<SrsHistoryExportResponse> =>
+        backendClient.call('srs/export-history'),
 
     /** 修改每日新卡上限；0 表示暂停入池。 */
     setDailyLimit: (limit: number): Promise<number> =>

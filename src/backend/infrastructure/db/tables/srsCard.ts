@@ -30,6 +30,8 @@ export const srsCard = sqliteTable('dp_srs_card', {
     pass_count: integer('pass_count', { mode: 'number' }).notNull().default(0),
     /** 掌握时间；非空表示已移出待复习队列，保留在「已掌握」统计里。 */
     mastered_at: integer('mastered_at', { mode: 'number' }),
+    /** 最近一次复习的错误标签，逗号分隔；用于专项筛选。 */
+    last_error_tags: text('last_error_tags').notNull().default(''),
     created_at: integer('created_at', { mode: 'number' }).notNull(),
     updated_at: integer('updated_at', { mode: 'number' }).notNull(),
 }, (table) => ({

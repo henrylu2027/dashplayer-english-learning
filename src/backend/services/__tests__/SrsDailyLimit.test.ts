@@ -57,6 +57,7 @@ function createService(state: FakeState): SrsServiceImpl {
                 reviewCount: 0,
                 passCount: 0,
                 masteredAt: null,
+                lastErrorTags: [],
                 createdAt: 0,
                 updatedAt: 0,
             },

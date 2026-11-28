@@ -2,10 +2,11 @@ import { useCallback, useEffect, useRef, useState, type RefObject } from 'react'
 import { useTranslation } from 'react-i18next';
 import toast from 'react-hot-toast';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { BookmarkPlus, BookOpen, Loader2, Plus, Repeat } from 'lucide-react';
+import { BookmarkPlus, BookOpen, Download, Loader2, Plus, Repeat } from 'lucide-react';
 
 import type {
     SrsCard,
+    SrsErrorTag,
     SrsOverview,
     SrsQueueFilter,
     SrsQueueScope,
@@ -54,6 +55,17 @@ interface GroupState {
 /** 空组。 */
 const EMPTY_GROUP: GroupState = { cards: [], total: 0 };
 
+/** 专项筛选选项。 */
+const TAG_FILTERS: Array<{ value: SrsErrorTag | 'all'; labelKey: string }> = [
+    { value: 'all', labelKey: 'srs.tagFilterAll' },
+    { value: 'pronunciation', labelKey: 'srs.tagPronunciation' },
+    { value: 'spelling', labelKey: 'srs.tagSpelling' },
+    { value: 'missing', labelKey: 'srs.tagMissing' },
+    { value: 'extra', labelKey: 'srs.tagExtra' },
+    { value: 'fluency', labelKey: 'srs.tagFluency' },
+    { value: 'structure', labelKey: 'srs.tagStructure' },
+];
+
 /** 筛选选项。 */
 const FILTERS: Array<{ value: SrsQueueFilter; labelKey: string }> = [
     { value: 'all', labelKey: 'srs.filterAll' },
@@ -80,6 +92,8 @@ export default function SrsReviewPage() {
     const [loading, setLoading] = useState(true);
     const [loadError, setLoadError] = useState<string | null>(null);
     const [filter, setFilter] = useState<SrsQueueFilter>('all');
+    /** 专项筛选：只看最近一次复习带该错误标签的卡。 */
+    const [tag, setTag] = useState<SrsErrorTag | 'all'>('all');
     /** 分组视图，或单列表视图（已掌握 / 全部）。 */
     const [view, setView] = useState<'grouped' | 'mastered' | 'all'>('grouped');
     const [groups, setGroups] = useState<Record<GroupKey, GroupState>>({
@@ -105,11 +119,12 @@ export default function SrsReviewPage() {
 
     /** 拉取统计与三个分组的第一页。 */
     const fetchOverviewAndGroups = useCallback(async () => {
+        const tagParam = tag === 'all' ? undefined : tag;
         const [data, todayQueue, overdueQueue, newQueue] = await Promise.all([
             srsApi.overview(),
-            srsApi.queue({ scope: 'today', filter, offset: 0, limit: PAGE_SIZE }),
-            srsApi.queue({ scope: 'overdue', filter, offset: 0, limit: PAGE_SIZE }),
-            srsApi.queue({ scope: 'new', filter, offset: 0, limit: PAGE_SIZE }),
+            srsApi.queue({ scope: 'today', filter, tag: tagParam, offset: 0, limit: PAGE_SIZE }),
+            srsApi.queue({ scope: 'overdue', filter, tag: tagParam, offset: 0, limit: PAGE_SIZE }),
+            srsApi.queue({ scope: 'new', filter, tag: tagParam, offset: 0, limit: PAGE_SIZE }),
         ]);
         setOverview(data);
         setGroups({
@@ -123,7 +138,7 @@ export default function SrsReviewPage() {
             overdue: overdueQueue.cards,
             new: newQueue.cards,
         };
-    }, [filter]);
+    }, [filter, tag]);
 
     useEffect(() => {
         let cancelled = false;
@@ -172,7 +187,13 @@ export default function SrsReviewPage() {
             }
             setFlatLoading(true);
             try {
-                const result = await srsApi.queue({ scope, filter, offset: 0, limit: PAGE_SIZE });
+                const result = await srsApi.queue({
+                    scope,
+                    filter,
+                    tag: tag === 'all' ? undefined : tag,
+                    offset: 0,
+                    limit: PAGE_SIZE,
+                });
                 if (!cancelled) {
                     setFlat({ cards: result.cards, total: result.total });
                 }
@@ -190,7 +211,7 @@ export default function SrsReviewPage() {
         return () => {
             cancelled = true;
         };
-    }, [view, filter, t]);
+    }, [view, filter, tag, t]);
 
     // 从学习台带过来的聚焦目标
     const focus = searchParams.get('focus');
@@ -230,6 +251,7 @@ export default function SrsReviewPage() {
             const result = await srsApi.queue({
                 scope,
                 filter,
+                tag: tag === 'all' ? undefined : tag,
                 offset: group.cards.length,
                 limit: PAGE_SIZE,
             });
@@ -245,6 +267,7 @@ export default function SrsReviewPage() {
         const result = await srsApi.queue({
             scope,
             filter,
+            tag: tag === 'all' ? undefined : tag,
             offset: flat.cards.length,
             limit: PAGE_SIZE,
         });
@@ -302,6 +325,26 @@ export default function SrsReviewPage() {
             toast.error(error instanceof Error ? error.message : t('srs.submitFailed'));
         } finally {
             setSubmittingVerdict(false);
+        }
+    };
+
+    /** 导出全部复习记录为 CSV。 */
+    const handleExport = async (): Promise<void> => {
+        try {
+            const result = await srsApi.exportHistory();
+            // 带 BOM，Excel 直接打开不会把中文识别成乱码
+            const csvText = String.fromCharCode(0xFEFF) + result.csv;
+            const blob = new Blob([csvText], { type: 'text/csv;charset=utf-8' });
+            const url = URL.createObjectURL(blob);
+            const anchor = document.createElement('a');
+            anchor.href = url;
+            anchor.download = result.fileName;
+            anchor.click();
+            URL.revokeObjectURL(url);
+            toast.success(t('srs.exportDone'));
+        } catch (error) {
+            logger.error('导出复习记录失败', { error });
+            toast.error(error instanceof Error ? error.message : t('srs.exportFailed'));
         }
     };
 
@@ -452,6 +495,16 @@ export default function SrsReviewPage() {
                             size="sm"
                             variant="outline"
                             className="h-8 rounded-lg px-3 text-xs"
+                            onClick={() => void handleExport()}
+                        >
+                            <Download className="mr-1 h-3.5 w-3.5" />
+                            {t('srs.exportHistory')}
+                        </Button>
+                        <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            className="h-8 rounded-lg px-3 text-xs"
                             onClick={() => setAddDialogOpen(true)}
                         >
                             <Plus className="mr-1 h-3.5 w-3.5" />
@@ -538,6 +591,18 @@ export default function SrsReviewPage() {
                             {t(item.labelKey)}
                         </button>
                     ))}
+                    <select
+                        value={tag}
+                        onChange={(event) => setTag(event.target.value as SrsErrorTag | 'all')}
+                        aria-label={t('srs.tagFilterAll')}
+                        className="ml-1 h-6 rounded-full border border-border/60 bg-transparent px-2 text-xs text-muted-foreground outline-none transition-colors hover:text-foreground focus:border-primary/50"
+                    >
+                        {TAG_FILTERS.map((item) => (
+                            <option key={item.value} value={item.value}>
+                                {t(item.labelKey)}
+                            </option>
+                        ))}
+                    </select>
                 </div>
 
                 {loadError && (

@@ -431,7 +431,13 @@
         "tagMissing": "Missing words",
         "tagExtra": "Extra words",
         "tagMeaning": "Meaning",
-        "tagStructure": "Structure"
+        "tagStructure": "Structure",
+        "tagFilterAll": "All tags",
+        "exportHistory": "Export",
+        "exportDone": "Review history exported",
+        "exportFailed": "Failed to export review history",
+        "archiveCalendar": "Calendar",
+        "calendarEmpty": "No reviews yet"
     },
     "dashboard": {
         "title": "Dashboard",

@@ -2,6 +2,7 @@ import type { ShadowingAttemptSource } from '@/common/contracts/shadowing';
 import type {
     SrsCard,
     SrsErrorTag,
+    SrsHistoryDay,
     SrsOverview,
     SrsQueueFilter,
     SrsQueueResponse,
@@ -69,6 +70,8 @@ export interface UpdateSrsCardReviewParams {
     passed: boolean;
     /** 掌握时间；本次判定后仍未掌握时为 null。 */
     masteredAt: number | null;
+    /** 本次评分的错误标签，写入卡表供专项筛选。 */
+    errorTags: SrsErrorTag[];
 }
 
 /**
@@ -83,6 +86,8 @@ export interface SrsQueueQuery {
     scope: SrsQueueScope;
     /** 筛选条件。 */
     filter: SrsQueueFilter;
+    /** 专项筛选：只看最近一次复习带该错误标签的卡片。 */
+    tag?: SrsErrorTag;
     /** 偏移量。 */
     offset: number;
     /** 最多返回条数。 */
@@ -230,4 +235,11 @@ export default interface SrsCardRepository {
      * @param limit 最多返回条数。
      */
     listReviewLog(from: number, limit: number): Promise<SrsReviewLogEntry[]>;
+
+    /**
+     * 按本地日期统计复习次数与机器通过次数。
+     * @param from 起始时间（含），epoch 毫秒。
+     * @returns 按日期正序的统计。
+     */
+    reviewCalendar(from: number): Promise<SrsHistoryDay[]>;
 }

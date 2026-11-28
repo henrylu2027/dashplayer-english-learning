@@ -26,6 +26,8 @@ export default class SrsController implements Controller {
         registerRoute('srs/card-thumbnail', (p) => this.srsService.getCardThumbnail(p.cardId));
         registerRoute('srs/word-definition', (p) => this.srsService.getWordDefinition(p.cardId));
         registerRoute('srs/history', (p) => this.srsService.history(p ?? {}));
+        registerRoute('srs/history-calendar', () => this.srsService.historyCalendar());
+        registerRoute('srs/export-history', () => this.srsService.exportHistory());
         registerRoute('srs/set-daily-limit', (p) => this.srsService.setDailyNewCardLimit(p.limit));
     }
 }

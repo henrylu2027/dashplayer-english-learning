@@ -12,6 +12,8 @@ import type {
     SrsCheckRequest,
     SrsCheckResult,
     SrsErrorTag,
+    SrsHistoryCalendarResponse,
+    SrsHistoryExportResponse,
     SrsHistoryItem,
     SrsHistoryRequest,
     SrsHistoryResponse,
@@ -172,6 +174,20 @@ export default interface SrsService {
     history(request: SrsHistoryRequest): Promise<SrsHistoryResponse>;
 
     /**
+     * 读取复习日历：最近一年的每日复习次数与通过次数。
+     *
+     * @returns 按日期正序的统计。
+     */
+    historyCalendar(): Promise<SrsHistoryCalendarResponse>;
+
+    /**
+     * 导出复习记录为 CSV。
+     *
+     * @returns 建议文件名与 CSV 文本。
+     */
+    exportHistory(): Promise<SrsHistoryExportResponse>;
+
+    /**
      * 修改每日新卡上限；0 表示暂停入池。
      *
      * @param limit 目标上限，范围 0~200。
@@ -310,6 +326,15 @@ function deriveRetellTags(score: number, words: ShadowingWordFeedback[]): SrsErr
 
 /** 需要提交机器评分的形态。 */
 const SCORED_FORMS: readonly SrsReviewForm[] = ['shadowing', 'dictation', 'scenario'];
+
+/**
+ * 把值转成 CSV 单元格；含逗号、引号或换行时加引号。
+ * @param value 单元格内容。
+ */
+function csvCell(value: string | number | null): string {
+    const text = value === null ? '' : String(value);
+    return /[",\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+}
 
 /**
  * 一次判定后的排期结果。
@@ -624,6 +649,7 @@ export class SrsServiceImpl implements SrsService {
             lastAttemptId: evidence.attemptId,
             passed,
             masteredAt: card.masteredAt,
+            errorTags: evidence.errorTags,
         });
         await this.writeReviewLog(
             card.id,
@@ -690,6 +716,7 @@ export class SrsServiceImpl implements SrsService {
             lastAttemptId: evidence.attemptId,
             passed: evidence.passed ?? request.verdict === 'known',
             masteredAt: decision.mastered ? now : null,
+            errorTags: evidence.errorTags,
         });
         await this.writeReviewLog(
             card.id,
@@ -734,6 +761,7 @@ export class SrsServiceImpl implements SrsService {
             todayStart: startOfToday(now),
             scope: request.scope ?? 'today',
             filter: request.filter ?? 'all',
+            tag: request.tag,
             offset,
             limit,
         });
@@ -838,6 +866,31 @@ export class SrsServiceImpl implements SrsService {
             });
         }
         return { items };
+    }
+
+    public async historyCalendar(): Promise<SrsHistoryCalendarResponse> {
+        const days = await this.srsCardRepository.reviewCalendar(Date.now() - 365 * DAY_MS);
+        return { days };
+    }
+
+    public async exportHistory(): Promise<SrsHistoryExportResponse> {
+        const entries = await this.srsCardRepository.listReviewLog(0, 5000);
+        const rows: string[] = ['时间,卡片ID,词句,形态,得分,通过,判定,错误标签'];
+        for (const entry of entries) {
+            const card = await this.srsCardRepository.findById(entry.cardId);
+            rows.push([
+                new Date(entry.createdAt).toLocaleString('zh-CN', { hour12: false }),
+                entry.cardId,
+                card?.referenceText ?? '',
+                entry.form,
+                entry.score,
+                entry.passed === null ? '' : (entry.passed ? '通过' : '未通过'),
+                entry.verdict,
+                entry.errorTags.join(' '),
+            ].map(csvCell).join(','));
+        }
+        const stamp = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+        return { fileName: `srs-history-${stamp}.csv`, csv: rows.join('\r\n') };
     }
 
     /**

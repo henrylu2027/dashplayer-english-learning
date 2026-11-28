@@ -99,6 +99,8 @@ import type {
     SrsCardThumbnail,
     SrsCheckRequest,
     SrsCheckResult,
+    SrsHistoryCalendarResponse,
+    SrsHistoryExportResponse,
     SrsHistoryRequest,
     SrsHistoryResponse,
     SrsIngestRequest,
@@ -597,6 +599,8 @@ interface SrsDef {
     'srs/card-thumbnail': { params: { cardId: number }, return: SrsCardThumbnail };
     'srs/word-definition': { params: { cardId: number }, return: SrsWordDefinition };
     'srs/history': { params: SrsHistoryRequest, return: SrsHistoryResponse };
+    'srs/history-calendar': { params: void, return: SrsHistoryCalendarResponse };
+    'srs/export-history': { params: void, return: SrsHistoryExportResponse };
     'srs/set-daily-limit': { params: { limit: number }, return: number };
 }
 

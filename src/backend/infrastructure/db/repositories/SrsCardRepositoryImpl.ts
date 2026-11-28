@@ -9,6 +9,7 @@ import type { ShadowingSourceKind } from '@/common/contracts/shadowing';
 import type {
     SrsCard,
     SrsErrorTag,
+    SrsHistoryDay,
     SrsOverview,
     SrsQueueFilter,
     SrsQueueResponse,
@@ -151,6 +152,7 @@ function mapRow(row: SrsCardRow): SrsCard {
         reviewCount: row.review_count,
         passCount: row.pass_count,
         masteredAt: row.mastered_at,
+        lastErrorTags: parseErrorTags(row.last_error_tags),
         createdAt: row.created_at,
         updatedAt: row.updated_at,
     };
@@ -286,6 +288,7 @@ export default class SrsCardRepositoryImpl implements SrsCardRepository {
                 review_count: sql`${srsCard.review_count} + 1`,
                 pass_count: sql`${srsCard.pass_count} + ${params.passed ? 1 : 0}`,
                 mastered_at: params.masteredAt,
+                last_error_tags: params.errorTags.join(','),
                 updated_at: Date.now(),
             })
             .where(eq(srsCard.id, params.id))
@@ -462,7 +465,10 @@ export default class SrsCardRepositoryImpl implements SrsCardRepository {
     }
 
     public async listQueue(query: SrsQueueQuery): Promise<SrsQueueResponse> {
-        const condition = and(this.scopeCondition(query), formFilter(query.filter));
+        const tagCondition = query.tag
+            ? sql`${srsCard.last_error_tags} LIKE ${`%${query.tag}%`}`
+            : undefined;
+        const condition = and(this.scopeCondition(query), formFilter(query.filter), tagCondition);
         const order = query.scope === 'mastered'
             ? [desc(srsCard.mastered_at), asc(srsCard.id)]
             : query.scope === 'new'
@@ -499,6 +505,26 @@ export default class SrsCardRepositoryImpl implements SrsCardRepository {
                 created_at: entry.createdAt,
             })
             .run();
+    }
+
+    public async reviewCalendar(from: number): Promise<SrsHistoryDay[]> {
+        const dayExpr = sql<string>`strftime('%Y-%m-%d', ${srsReviewLog.created_at} / 1000, 'unixepoch', 'localtime')`;
+        return db
+            .select({
+                date: dayExpr,
+                count: sql<number>`count(*)`,
+                passed: sql<number>`sum(case when ${srsReviewLog.passed} = 1 then 1 else 0 end)`,
+            })
+            .from(srsReviewLog)
+            .where(gte(srsReviewLog.created_at, from))
+            .groupBy(dayExpr)
+            .orderBy(asc(dayExpr))
+            .all()
+            .map((row) => ({
+                date: row.date,
+                count: Number(row.count),
+                passed: Number(row.passed ?? 0),
+            }));
     }
 
     public async listReviewLog(from: number, limit: number): Promise<SrsReviewLogEntry[]> {
