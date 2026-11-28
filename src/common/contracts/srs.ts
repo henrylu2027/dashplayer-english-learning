@@ -170,6 +170,8 @@ export interface SrsIngestResponse {
     created: boolean;
     /** 是否因当日上限进入待办队列。 */
     queued: boolean;
+    /** 是否被拒绝入池：没有原声原句的裸词不进入复习。 */
+    rejected: boolean;
 }
 
 /**

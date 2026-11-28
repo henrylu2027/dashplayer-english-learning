@@ -60,4 +60,6 @@ export interface LearnWordData {
     queued: boolean;
     /** 入池后的卡片 ID；排队中或已存在时为对应值，排队中可能为 null。 */
     cardId: number | null;
+    /** 是否因没有原声原句被拒绝入池；词本身仍标为已学。 */
+    srsRejected: boolean;
 }

@@ -177,6 +177,7 @@ export default function WordSidebar({
     setAddingToReview(true);
     let added = 0;
     let queued = 0;
+    let noSource = 0;
     let failed = 0;
     try {
       for (const word of targets) {
@@ -186,7 +187,9 @@ export default function WordSidebar({
           continue;
         }
         setLearnedAtById((previous) => ({ ...previous, [word.id]: Date.now() }));
-        if (response.data?.queued) {
+        if (response.data?.srsRejected) {
+          noSource += 1;
+        } else if (response.data?.queued) {
           queued += 1;
         } else {
           added += 1;
@@ -194,7 +197,11 @@ export default function WordSidebar({
       }
       if (failed > 0) {
         toast.error(t('wordLearnPartialFailed', { failed }));
-      } else {
+      }
+      if (noSource > 0) {
+        toast.error(t('wordLearnNoSourceBatch', { count: noSource }));
+      }
+      if (added + queued > 0) {
         toast.success(t('wordLearnBatchDone', { added, queued }));
       }
     } catch (error) {
@@ -217,7 +224,9 @@ export default function WordSidebar({
         return;
       }
       setLearnedAtById((previous) => ({ ...previous, [word.id]: Date.now() }));
-      if (response.data?.queued) {
+      if (response.data?.srsRejected) {
+        toast.success(t('wordLearnedNoReview'));
+      } else if (response.data?.queued) {
         toast.success(t('wordLearnQueued'));
       } else {
         toast.success(response.data?.hasContext ? t('wordLearnedWithContext') : t('wordLearnedNoContext'));

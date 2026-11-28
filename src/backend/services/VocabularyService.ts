@@ -122,7 +122,7 @@ export default interface VocabularyService {
      *
      * 行为说明：
      * - 有出处时用出处句建卡，目标词写入卡片；同一句已有卡则只补目标词；
-     * - 没有出处（如导入的默认词表）时用词本身建卡，交给复习页的认词形态；
+     * - 没有出处（如导入的默认词表）时不进复习池，只把词标为已学；
      * - 无论是否排队成功，都会记录 learned_at。
      *
      * @param word 词条原文。
@@ -612,7 +612,7 @@ export class VocabularyServiceImpl implements VocabularyService {
      *
      * 行为说明：
      * - 有出处时用出处句做语境卡，目标词写入卡片；同一句已有卡只补目标词；
-     * - 没有出处时用词本身建卡，交给复习页的认词形态；
+     * - 没有出处时只标为已学，不进入复习池；
      * - 入池受每日上限约束，排队中也算已学会。
      *
      * @param word 词条原文（可能是变体）。
@@ -652,6 +652,7 @@ export class VocabularyServiceImpl implements VocabularyService {
                     hasContext,
                     queued: ingested.queued,
                     cardId: ingested.card?.id ?? null,
+                    srsRejected: ingested.rejected,
                 },
             };
         } catch (error) {

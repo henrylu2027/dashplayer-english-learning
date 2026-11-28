@@ -27,6 +27,7 @@ import {
     SRS_MAX_DAILY_NEW_CARD_LIMIT,
     SRS_PASS_SCORE,
 } from '@/common/contracts/srs';
+import type { ShadowingAttemptSource } from '@/common/contracts/shadowing';
 import type { SettingsStore } from '@/backend/services/gateways/SettingsStore';
 import type SentenceAudioService from '@/backend/services/SentenceAudioService';
 import type SrsCardRepository from '@/backend/services/repositories/SrsCardRepository';
@@ -185,6 +186,24 @@ function intervalForStage(stage: number): number {
 }
 
 /**
+ * 是否为「无原声原句」的裸词：没有视频出处，且文本里没有空格。
+ *
+ * 这类卡片复习时既放不了原声，也没有可跟读的原句，口径要求不进入复习池。
+ *
+ * @param source 句子来源。
+ * @param referenceText 归一化前的复习文本。
+ */
+function isSourcelessWord(
+    source: ShadowingAttemptSource,
+    referenceText: string,
+): boolean {
+    const hasVideo = source.kind === 'video'
+        && Boolean(source.videoPath)
+        && Boolean(source.subtitlePath);
+    return !hasVideo && !referenceText.includes(' ');
+}
+
+/**
  * 一次判定后的排期结果。
  */
 interface ScheduleDecision {
@@ -321,6 +340,11 @@ export class SrsServiceImpl implements SrsService {
             throw new Error(`复习句子过长，请控制在 ${MAX_REVIEW_WORDS} 词以内`);
         }
         const source = normalizeShadowingSource(request.source);
+        if (isSourcelessWord(source, referenceText)) {
+            // 没有原声原句的裸词不进复习池，也不占每日新卡上限
+            this.logger.info('srs ingest rejected', { module: request.module, reason: 'no-source-word' });
+            return { card: null, created: false, queued: false, rejected: true };
+        }
         const cardKey = buildSrsCardKey(referenceText, source);
         const word = request.word?.trim() ? request.word.trim() : null;
         const now = Date.now();
@@ -329,7 +353,7 @@ export class SrsServiceImpl implements SrsService {
         if (existing) {
             // 同一句从多个模块进来：只补来源与目标词，不改排期
             await this.srsCardRepository.mergeCardMeta(cardKey, [request.module], word);
-            return { card: existing, created: false, queued: false };
+            return { card: existing, created: false, queued: false, rejected: false };
         }
 
         const priority = request.failed ? 0 : (MODULE_PRIORITY[request.module] ?? 2);
@@ -346,7 +370,7 @@ export class SrsServiceImpl implements SrsService {
         if (request.failed) {
             const { card, created } = await this.srsCardRepository.createIfAbsent({ ...base, dueAt: now });
             await this.srsCardRepository.removeIntake(cardKey);
-            return { card, created, queued: false };
+            return { card, created, queued: false, rejected: false };
         }
 
         const todayStart = startOfToday(now);
@@ -355,7 +379,7 @@ export class SrsServiceImpl implements SrsService {
         if (createdToday >= dailyLimit) {
             await this.srsCardRepository.enqueueIntake({ ...base, createdAt: now });
             this.logger.info('srs ingest queued', { module: request.module, cardKey, dailyLimit });
-            return { card: null, created: false, queued: true };
+            return { card: null, created: false, queued: true, rejected: false };
         }
 
         const { card, created } = await this.srsCardRepository.createIfAbsent({
@@ -369,7 +393,7 @@ export class SrsServiceImpl implements SrsService {
             module: request.module,
             failed: false,
         });
-        return { card, created, queued: false };
+        return { card, created, queued: false, rejected: false };
     }
 
     /**

@@ -121,6 +121,23 @@ describe('每日新卡上限', () => {
         expect(state.queued).toEqual([]);
     });
 
+    it('无原声原句的裸词直接拒绝，不建卡也不占上限', async () => {
+        const state: FakeState = { createdToday: 0, stored: '50', queued: [] };
+        const service = createService(state);
+
+        const result = await service.ingest({
+            referenceText: 'abandon',
+            source: { kind: 'free' },
+            module: 'vocabulary',
+            word: 'abandon',
+        });
+
+        expect(result.rejected).toBe(true);
+        expect(result.card).toBeNull();
+        expect(result.queued).toBe(false);
+        expect(state.queued).toEqual([]);
+    });
+
     it('达到上限后进入待办队列，不建卡', async () => {
         const state: FakeState = { createdToday: 50, stored: '50', queued: [] };
         const service = createService(state);
