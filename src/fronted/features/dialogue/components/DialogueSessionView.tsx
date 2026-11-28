@@ -550,7 +550,7 @@ export default function DialogueSessionView({
 
                     <div
                         ref={bubbleListRef}
-                        className="flex h-[22rem] flex-col gap-3 overflow-y-auto pr-1"
+                        className="flex h-[22.5rem] flex-col gap-3 overflow-y-auto pr-1"
                     >
                         {loading && (
                             <div className="flex items-center justify-center gap-2 py-6 text-xs text-muted-foreground">
